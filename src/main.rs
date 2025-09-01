@@ -1,9 +1,7 @@
-use std::cmp::{max, min};
-
-use image::{GenericImage, Rgb};
+use image::Rgb;
 use obj::Obj;
 use rand::Rng;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::ParallelIterator;
 
 #[derive(Debug, Clone)]
 struct ImgCoord2D {
@@ -45,18 +43,43 @@ fn filled_triangle(
     }
 
     // run on bounding box
-    img.par_enumerate_pixels_mut().for_each(|(x, y, px)| {
-        if
-        // within bounding box
-        x >= min_x && x < max_x && y >= min_y && y < max_y
+    img.par_enumerate_pixels_mut()
+        .filter(|(x, y, _)| {
+            // within bounding box
+            *x >= min_x && *x < max_x && *y >= min_y && *y < max_y
+        })
+        .for_each(|(x, y, px)| {
+            let a = bay_tri_area(
+                &ImgCoord2D {
+                    x: x as i32,
+                    y: y as i32,
+                },
+                pt1,
+                pt2,
+            ) / max_area;
+            let b = bay_tri_area(
+                &ImgCoord2D {
+                    x: x as i32,
+                    y: y as i32,
+                },
+                pt2,
+                pt0,
+            ) / max_area;
+            let c = bay_tri_area(
+                &ImgCoord2D {
+                    x: x as i32,
+                    y: y as i32,
+                },
+                pt0,
+                pt1,
+            ) / max_area;
+
             // within triangle
-            && bay_tri_area(&ImgCoord2D { x:x as i32,y:y as i32 }, pt1, pt2) / max_area > 0.0
-            && bay_tri_area(&ImgCoord2D { x:x as i32,y:y as i32 }, pt2, pt0) / max_area > 0.0
-            && bay_tri_area(&ImgCoord2D { x:x as i32,y:y as i32 }, pt0, pt1) / max_area > 0.0
-        {
-            *px = *color;
-        }
-    });
+            if a > 0.0 && b > 0.0 && c > 0.0 {
+                // color
+                *px = *color;
+            }
+        });
 }
 
 fn main() {
