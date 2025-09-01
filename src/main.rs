@@ -1,5 +1,9 @@
-use image::Rgb;
+use std::cmp::{max, min};
+
+use image::{GenericImage, Rgb};
 use obj::Obj;
+use rand::Rng;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 #[derive(Debug, Clone)]
 struct ImgCoord2D {
@@ -16,73 +20,43 @@ impl ImgCoord2D {
     }
 }
 
-fn line<Img, Pixel: Clone>(img: &mut Img, pt0: &ImgCoord2D, pt1: &ImgCoord2D, color: &Pixel)
-where
-    Img: image::GenericImage<Pixel = Pixel>,
-{
-    let dims = img.dimensions();
-
-    // check if transpose due to steep lines
-    let (pt0, pt1, transpose) = if (pt0.x - pt1.x).abs() < (pt0.y - pt1.y).abs() {
-        (pt0.clone().t(), pt1.clone().t(), true)
-    } else {
-        (pt0.clone(), pt1.clone(), false)
-    };
-
-    // order lower x first
-    let (pt0, pt1) = if pt0.x <= pt1.x {
-        (pt0, pt1)
-    } else {
-        (pt1, pt0)
-    };
-
-    // setup delta
-    let delta_x = pt1.x - pt0.x;
-    let delta_err = (pt1.y - pt0.y).abs() * 2;
-    let mut err = 0;
-    let mut y_at = pt0.y;
-    let mut place_px_fn: Box<dyn FnMut(u32, u32)> = if transpose {
-        Box::new(|y, x| img.put_pixel(x, y, color.clone()))
-    } else {
-        Box::new(|x, y| img.put_pixel(x, y, color.clone()))
-    };
-
-    // put pixels
-    for x_at in (pt0.x)..=(pt1.x) {
-        // skip outside the image
-        if y_at < 0 || x_at < 0 || x_at as u32 > dims.0 || y_at as u32 > dims.1 {
-            continue;
-        }
-
-        // pixel place
-        place_px_fn(x_at as u32, y_at as u32);
-
-        // compute error
-        err += delta_err;
-        if err > delta_x {
-            // on significant err, move pixel
-            if pt0.y < pt1.y {
-                y_at += 1
-            } else {
-                y_at -= 1
-            };
-            err -= delta_x * 2;
-        }
-    }
+fn bay_tri_area(a: &ImgCoord2D, b: &ImgCoord2D, c: &ImgCoord2D) -> f32 {
+    let a = (a.x as f32, a.y as f32);
+    let b = (b.x as f32, b.y as f32);
+    let c = (c.x as f32, c.y as f32);
+    0.5 * ((b.1 - a.1) * (b.0 + a.0) + (c.1 - b.1) * (c.0 + b.0) + (a.1 - c.1) * (a.0 + c.0))
 }
 
-fn triangle<Img, Pixel: Clone>(
-    img: &mut Img,
+fn filled_triangle(
+    img: &mut image::RgbImage,
     pt0: &ImgCoord2D,
     pt1: &ImgCoord2D,
     pt2: &ImgCoord2D,
-    color: &Pixel,
-) where
-    Img: image::GenericImage<Pixel = Pixel>,
-{
-    line(img, &pt0, &pt1, &color);
-    line(img, &pt1, &pt2, &color);
-    line(img, &pt2, &pt0, &color);
+    color: &Rgb<u8>,
+) {
+    // make max bounding box
+    let min_x = pt0.x.min(pt1.x.min(pt2.x)) as u32;
+    let min_y = pt0.y.min(pt1.y.min(pt2.y)) as u32;
+    let max_x = pt0.x.max(pt1.x.max(pt2.x)) as u32;
+    let max_y = pt0.y.max(pt1.y.max(pt2.y)) as u32;
+    let max_area = bay_tri_area(pt0, pt1, pt2);
+    if max_area < 1.0 {
+        return;
+    }
+
+    // run on bounding box
+    img.par_enumerate_pixels_mut().for_each(|(x, y, px)| {
+        if
+        // within bounding box
+        x >= min_x && x < max_x && y >= min_y && y < max_y
+            // within triangle
+            && bay_tri_area(&ImgCoord2D { x:x as i32,y:y as i32 }, pt1, pt2) / max_area > 0.0
+            && bay_tri_area(&ImgCoord2D { x:x as i32,y:y as i32 }, pt2, pt0) / max_area > 0.0
+            && bay_tri_area(&ImgCoord2D { x:x as i32,y:y as i32 }, pt0, pt1) / max_area > 0.0
+        {
+            *px = *color;
+        }
+    });
 }
 
 fn main() {
@@ -90,12 +64,13 @@ fn main() {
     let (width, height) = img.dimensions();
     let width = width - 1;
     let height = height - 1;
-    
+
     // extract out required parts
     let obj = Obj::load("african_head.obj").unwrap().data;
     let faces = &obj.objects[0].groups[0].polys;
     let verts = &obj.position;
-   
+    let mut rando = rand::rng();
+
     // per polygon
     for face in faces.iter() {
         // decode face positions
@@ -115,7 +90,7 @@ fn main() {
             y: (height as i32 - ((vert2[1] + 1.0) * (height as f32) / 2.0).round() as i32),
         };
         // triangle
-        triangle(&mut img, &pt0, &pt1, &pt3, &Rgb([255, 0, 0]));
+        filled_triangle(&mut img, &pt0, &pt1, &pt3, &Rgb(rando.random::<[u8; 3]>()));
     }
 
     img.save("arf.tga").unwrap();
