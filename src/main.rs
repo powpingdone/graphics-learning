@@ -18,6 +18,13 @@ impl ImgCoord2D {
     }
 }
 
+#[derive(Debug, Clone)]
+struct Coords3D {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
 fn bay_tri_area(a: &ImgCoord2D, b: &ImgCoord2D, c: &ImgCoord2D) -> f32 {
     let a = (a.x as f32, a.y as f32);
     let b = (b.x as f32, b.y as f32);
@@ -30,7 +37,6 @@ fn filled_triangle(
     pt0: &ImgCoord2D,
     pt1: &ImgCoord2D,
     pt2: &ImgCoord2D,
-    color: &Rgb<u8>,
 ) {
     // make max bounding box
     let min_x = pt0.x.min(pt1.x.min(pt2.x)) as u32;
@@ -77,7 +83,11 @@ fn filled_triangle(
             // within triangle
             if a > 0.0 && b > 0.0 && c > 0.0 {
                 // color
-                *px = *color;
+                let r = (a * 255.0).clamp(0.0, 255.0) as u8;
+                let g = (b * 255.0).clamp(0.0, 255.0) as u8;
+                let b = (c * 255.0).clamp(0.0, 255.0) as u8;
+
+                *px = Rgb([r, g, b]);
             }
         });
 }
@@ -92,7 +102,6 @@ fn main() {
     let obj = Obj::load("african_head.obj").unwrap().data;
     let faces = &obj.objects[0].groups[0].polys;
     let verts = &obj.position;
-    let mut rando = rand::rng();
 
     // per polygon
     for face in faces.iter() {
@@ -113,7 +122,7 @@ fn main() {
             y: (height as i32 - ((vert2[1] + 1.0) * (height as f32) / 2.0).round() as i32),
         };
         // triangle
-        filled_triangle(&mut img, &pt0, &pt1, &pt3, &Rgb(rando.random::<[u8; 3]>()));
+        filled_triangle(&mut img, &pt0, &pt1, &pt3);
     }
 
     img.save("arf.tga").unwrap();
