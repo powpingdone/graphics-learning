@@ -92,6 +92,7 @@ fn filled_triangle(
         });
 }
 
+// https://haqr.eu/tinyrenderer
 fn main() {
     let mut img = image::RgbImage::new(1024, 1024);
     let (width, height) = img.dimensions();
