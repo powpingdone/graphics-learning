@@ -30,10 +30,11 @@
           default = pkgs.mkShell rec {
             packages =
               [
-                fenix.packages.${system}.stable.toolchain
+                fenix.packages.${system}.default.toolchain
               ]
               ++ (with pkgs; [
                 rust-analyzer
+                cargo-expand
               ]);
             buildInputs = packages;
 
