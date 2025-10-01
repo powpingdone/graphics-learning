@@ -1,4 +1,4 @@
-
+#![recursion_limit="128"]
 use image::Rgb;
 use obj::Obj;
 use rayon::iter::IndexedParallelIterator;
