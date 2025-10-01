@@ -29,6 +29,13 @@ impl<I: ArrayLength + Unsigned> Vect<I> {
     }
 }
 
+impl<I: ArrayLength + Unsigned> Default for Vect<I> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// indexing
 impl<I: ArrayLength + Unsigned> Index<usize> for Vect<I> {
     type Output = f32;
 
@@ -43,6 +50,7 @@ impl<I: ArrayLength + Unsigned> IndexMut<usize> for Vect<I> {
     }
 }
 
+// well defined operations
 impl<I: ArrayLength + Unsigned> Add<Vect<I>> for Vect<I> {
     type Output = Vect<I>;
 
@@ -65,6 +73,7 @@ impl<I: ArrayLength + Unsigned> Sub<Vect<I>> for Vect<I> {
     }
 }
 
+// broadcast ops
 impl<I: ArrayLength + Unsigned> Add<f32> for Vect<I> {
     type Output = Vect<I>;
 
@@ -73,5 +82,58 @@ impl<I: ArrayLength + Unsigned> Add<f32> for Vect<I> {
             self[x] += rhs;
         }
         self
-    } 
+    }
+}
+
+impl<I: ArrayLength + Unsigned> Sub<f32> for Vect<I> {
+    type Output = Vect<I>;
+
+    fn sub(mut self, rhs: f32) -> Self::Output {
+        for x in 0..I::USIZE {
+            self[x] -= rhs;
+        }
+        self
+    }
+}
+
+impl<I: ArrayLength + Unsigned> Mul<f32> for Vect<I> {
+    type Output = Vect<I>;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        for x in 0..I::USIZE {
+            self[x] *= rhs;
+        }
+        self
+    }
+}
+
+impl<I: ArrayLength + Unsigned> Div<f32> for Vect<I> {
+    type Output = Vect<I>;
+
+    fn div(mut self, rhs: f32) -> Self::Output {
+        for x in 0..I::USIZE {
+            self[x] /= rhs;
+        }
+        self
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone)]
+struct Mat<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> {
+    mat: GenericArray<Vect<Y>, X>,
+}
+
+impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Mat<X, Y> {
+    pub fn new() -> Self {
+        Self {
+            mat: GenericArray::default(),
+        }
+    }
+}
+
+impl<X: ArrayLength + Unsigned, Y:  ArrayLength + Unsigned> Default for Mat<X, Y> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
