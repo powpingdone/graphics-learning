@@ -127,7 +127,7 @@ struct Mat<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> {
 impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Mat<X, Y> {
     pub fn new() -> Self {
         const {
-            assert!(<X as Unsigned>::USIZE < 5 && <X as Unsigned>::USIZE > 0);
+            assert!(X::USIZE < 5 && X::USIZE > 0);
             assert!(<Y as Unsigned>::USIZE < 5 && <Y as Unsigned>::USIZE > 0);
         }
         Self {
@@ -143,6 +143,43 @@ impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Mat<X, Y> {
             }
         }
         ret
+    }
+}
+
+impl<I: ArrayLength + Unsigned + Sub<U1>> Mat<I, I>
+where
+    <I as Sub<U1>>::Output: ArrayLength + Unsigned,
+{
+    pub fn invert_t(&self) -> Mat<I, I> {
+        let mut adjugate_t = Mat::default();
+        for i in 0..(I::USIZE - 1) {
+            for j in 0..(I::USIZE - 1) {
+                adjugate_t[i][j] = self.cofactor(i, j);
+            }
+        }
+        adjugate_t.clone() / (adjugate_t[0].dot(&self[0]))
+    }
+
+    pub fn invert(&self) -> Self {
+        self.invert_t().t()
+    }
+
+    fn cofactor(&self, x: usize, y: usize) -> f32 {
+        let mut submat = Mat::<<I as Sub<U1>>::Output, <I as Sub<U1>>::Output>::new();
+        for i in 0..(I::USIZE - 1) {
+            for j in 0..(I::USIZE - 1) {
+                submat[i][j] = self[i + ((i >= x) as usize)][j + ((j >= y) as usize)];
+            }
+        }
+        submat.det() * (if (x + y) % 2 == 1 { -1. } else { 1. })
+    }
+
+    fn det(&self) -> f32 {
+        if const { I::USIZE == 1 } {
+            self[0][0]
+        } else {
+            (0..I::USIZE).fold(0.0, |acc, i| acc + self[0][i] * self.cofactor(0, i))
+        }
     }
 }
 
@@ -167,13 +204,26 @@ impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Default for Mat<X, Y>
 }
 
 // standard ops
-impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Add<Mat<X, Y>> for Mat<X,Y> {
-    type Output = Mat<X,Y>;
+impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Add<Mat<X, Y>> for Mat<X, Y> {
+    type Output = Mat<X, Y>;
 
     fn add(mut self, rhs: Mat<X, Y>) -> Self::Output {
         for x in 0..X::USIZE {
             for y in 0..Y::USIZE {
                 self[x][y] += rhs[x][y];
+            }
+        }
+        self
+    }
+}
+
+impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Sub<Mat<X, Y>> for Mat<X, Y> {
+    type Output = Mat<X, Y>;
+
+    fn sub(mut self, rhs: Mat<X, Y>) -> Self::Output {
+        for x in 0..X::USIZE {
+            for y in 0..Y::USIZE {
+                self[x][y] -= rhs[x][y];
             }
         }
         self
@@ -194,9 +244,62 @@ impl<X: ArrayLength + Unsigned, M: ArrayLength + Unsigned, Y: ArrayLength + Unsi
             for y in 0..Y::USIZE {
                 for i in 0..M::USIZE {
                     ret[x][y] += self[x][i] * rhs[i][y];
-                } 
+                }
             }
         }
-        ret 
+        ret
+    }
+}
+
+// broadcast scalar
+impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Add<f32> for Mat<X, Y> {
+    type Output = Mat<X, Y>;
+
+    fn add(mut self, rhs: f32) -> Self::Output {
+        for x in 0..X::USIZE {
+            for y in 0..X::USIZE {
+                self[x][y] += rhs;
+            }
+        }
+        self
+    }
+}
+
+impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Sub<f32> for Mat<X, Y> {
+    type Output = Mat<X, Y>;
+
+    fn sub(mut self, rhs: f32) -> Self::Output {
+        for x in 0..X::USIZE {
+            for y in 0..X::USIZE {
+                self[x][y] -= rhs;
+            }
+        }
+        self
+    }
+}
+
+impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Mul<f32> for Mat<X, Y> {
+    type Output = Mat<X, Y>;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        for x in 0..X::USIZE {
+            for y in 0..X::USIZE {
+                self[x][y] *= rhs;
+            }
+        }
+        self
+    }
+}
+
+impl<X: ArrayLength + Unsigned, Y: ArrayLength + Unsigned> Div<f32> for Mat<X, Y> {
+    type Output = Mat<X, Y>;
+
+    fn div(mut self, rhs: f32) -> Self::Output {
+        for x in 0..X::USIZE {
+            for y in 0..X::USIZE {
+                self[x][y] /= rhs;
+            }
+        }
+        self
     }
 }
