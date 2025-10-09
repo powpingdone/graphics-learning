@@ -5,6 +5,7 @@ use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 
+#[allow(dead_code)]
 mod vec;
 use crate::vec::*;
 
@@ -104,7 +105,7 @@ fn main() {
 
     // show output
     img.save("arf.tga").unwrap();
-
+    
     // show zbuf
     let zmin = zbuf
         .iter()

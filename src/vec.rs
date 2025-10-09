@@ -20,21 +20,22 @@ use std::ops::*;
 // TODO
 
 macro_rules! vec_gen {
-    ($name:ident => $size:expr) => {
+    ($name:ident => $size:expr, $type:ty) => {
         // Construct this struct via $name::from or $name::default
-        pub struct $name<T>([T; $size]);
+        #[derive(Debug, Default, Clone, Copy, PartialEq)]
+        pub struct $name([$type; $size]);
 
-        impl<T> $name<T> {
-            const LEN: usize = $size;
-            
-            const fn len(&self) -> usize {
+        impl $name {
+            pub const LEN: usize = $size;
+
+            pub const fn len(&self) -> usize {
                 Self::LEN
             }
         }
 
         // dot product
-        impl<T: Default + Copy + Add<Output = T> + Mul<Output = T>> $name<T> {
-            pub fn dot(&self, rhs: $name<T>) -> T {
+        impl $name {
+            pub fn dot(&self, rhs: $name) -> $type {
                 self.0
                     .iter()
                     .zip(rhs.0.iter())
@@ -43,126 +44,73 @@ macro_rules! vec_gen {
         }
 
         // common traits
-        impl<T: Default> Default for $name<T> {
-            fn default() -> Self {
-                Self(Default::default())
-            }
-        }
-
-        impl<T: Clone> Clone for $name<T> {
-            fn clone(&self) -> Self {
-                Self(self.0.clone())
-            }
-        }
-
-        impl<T: Copy> Copy for $name<T> {}
-
-        impl<T> From<[T; $size]> for $name<T> {
-            fn from(i: [T; $size]) -> Self {
+        impl From<[$type; $size]> for $name {
+            fn from(i: [$type; $size]) -> Self {
                 Self(i)
             }
         }
 
         // indexing
-        impl<T> Index<usize> for $name<T> {
-            type Output = T;
+        impl Index<usize> for $name {
+            type Output = $type;
 
-            fn index(&self, index: usize) -> &T {
+            fn index(&self, index: usize) -> &$type {
                 &self.0[index]
             }
         }
 
-        impl<T> IndexMut<usize> for $name<T> {
-            fn index_mut(&mut self, index: usize) -> &mut T {
+        impl IndexMut<usize> for $name {
+            fn index_mut(&mut self, index: usize) -> &mut $type {
                 &mut self.0[index]
             }
         }
 
-        // glsl defined operations: add, sub, mul, and div are component wise
-        impl<T: Add<Output = T> + Copy> Add for $name<T> {
-            type Output = $name<T>;
+        // normal broadcast ops
+        vec_broadcast_op!($name ($type) => Add (add), +);
+        vec_broadcast_op!($name ($type) => Sub (sub), -);
+        vec_broadcast_op!($name ($type) => Mul (mul), *);
+        vec_broadcast_op!($name ($type) => Div (div), /);
+        vec_broadcast_op!($name ($type) => Rem (rem), %);
 
-            fn add(mut self, rhs: $name<T>) -> $name<T> {
+
+        // int specific broadcast ops
+        //vec_broadcast_op!($name => Shl (shl), <<, $type);
+        //vec_broadcast_op!($name => Shr (shr), >>, $type);
+        //vec_broadcast_op!($name => BitAnd (bitand), &, $type);
+        //vec_broadcast_op!($name => BitOr (bitor), |, $type);
+        //vec_broadcast_op!($name => BitXor (bitxor), ^, $type);
+    };
+}
+
+// glsl ops are broadcast for any vec2vec or vec2scalar operation
+macro_rules! vec_broadcast_op {
+    ($name:ident ($type:ty) => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
+        vec_broadcast_indivdual_impl!($name ($type) => $trait_name ($trait_fn), $op_by);
+        vec_broadcast_indivdual_impl!($name => $trait_name ($trait_fn), $op_by);
+    };
+}
+
+macro_rules! vec_broadcast_indivdual_impl {
+    ($name:ident ($type:ty) => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
+        impl $trait_name<$type> for $name {
+            type Output = $name;
+
+            fn $trait_fn(mut self, rhs: $type) -> $name {
                 for x in 0..Self::LEN {
-                    self[x] = self[x] + rhs[x];
+                    self[x] = self[x] $op_by rhs;
                 }
                 self
             }
         }
+    };
 
-        impl<T: Sub<Output = T> + Copy> Sub for $name<T> {
-            type Output = $name<T>;
+    ($name:ident => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
+        impl $trait_name<$name> for $name {
+            type Output = $name;
 
-            fn sub(mut self, rhs: $name<T>) -> $name<T> {
+            fn $trait_fn(mut self, rhs: Self) -> $name {
                 for x in 0..Self::LEN {
-                    self[x] = self[x] - rhs[x];
-                }
-                self
-            }
-        }
-        
-        impl<T: Mul<Output = T> + Copy> Mul for $name<T> {
-            type Output = $name<T>;
-
-            fn mul(mut self, rhs: $name<T>) -> $name<T> {
-                for x in 0..Self::LEN {
-                    self[x] = self[x] * rhs[x];
-                }
-                self
-            }
-        }
-
-        impl<T: Div<Output = T> + Copy> Div for $name<T> {
-            type Output = $name<T>;
-
-            fn div(mut self, rhs: $name<T>) -> $name<T> {
-                for x in 0..Self::LEN {
-                    self[x] = self[x] / rhs[x];
-                }
-                self
-            }
-        }
-
-        // broadcast ops, also glsl defined.
-        impl<T: Add<Output = T> + Copy> Add<T> for $name<T> {
-            type Output = $name<T>;
-
-            fn add(mut self, rhs: T) -> $name<T> {
-                for x in 0..Self::LEN {
-                    self[x] = self[x] + rhs;
-                }
-                self
-            }
-        }
-
-        impl<T: Sub<Output = T> + Copy> Sub<T> for $name<T> {
-            type Output = $name<T>;
-
-            fn sub(mut self, rhs: T) -> $name<T> {
-                for x in 0..Self::LEN {
-                    self[x] = self[x] - rhs;
-                }
-                self
-            }
-        }
-        
-        impl<T: Mul<Output = T> + Copy> Mul<T> for $name<T> {
-            type Output = $name<T>;
-
-            fn mul(mut self, rhs: T) -> $name<T> {
-                for x in 0..Self::LEN {
-                    self[x] = self[x] * rhs;
-                }
-                self
-            }
-        }
-        
-        impl<T: Div<Output = T> + Copy> Div<T> for $name<T> {
-            type Output = $name<T>;
-
-            fn div(mut self, rhs: T) -> $name<T> {
-                for x in 0..Self::LEN {
-                    self[x] = self[x] / rhs;
+                    self[x] = self[x] $op_by rhs[x];
                 }
                 self
             }
@@ -170,20 +118,107 @@ macro_rules! vec_gen {
     };
 }
 
-vec_gen!(Vec2 => 2);
-vec_gen!(Vec3 => 3);
-vec_gen!(Vec4 => 4);
+vec_gen!(Vec2 => 2, f32);
+vec_gen!(Vec3 => 3, f32);
+vec_gen!(Vec4 => 4, f32);
 
 // mat
+macro_rules! mat_gen {
+    ($name:ident => $vec_row:ident * $col_len:expr) => {
+        // Construct this struct via $name::from or $name::default
+        #[derive(Debug, Default, Clone, Copy, PartialEq)]
+        pub struct $name([$vec_row; $col_len]);
 
-// transpose
-// let mut ret = Mat::new();
-// for x in 0..X::USIZE {
-//     for y in 0..Y::USIZE {
-//         ret[y][x] = self[x][y];
-//     }
-// }
-// ret
+        impl $name {
+            pub const COLS: usize = $col_len;
+            pub const ROWS: usize = $vec_row::LEN;
+
+            pub const fn cols(&self) -> usize {
+                Self::COLS
+            }
+
+            pub const fn rows(&self) -> usize {
+                Self::ROWS
+            }
+        }
+
+        // common traits
+        impl From<[$vec_row; $col_len]> for $name {
+            fn from(i: [$vec_row; $col_len]) -> Self {
+                Self(i)
+            }
+        }
+
+        // indexing
+        impl Index<usize> for $name {
+            type Output = $vec_row;
+
+            fn index(&self, index: usize) -> &$vec_row {
+                &self.0[index]
+            }
+        }
+
+        impl IndexMut<usize> for $name {
+            fn index_mut(&mut self, index: usize) -> &mut $vec_row {
+                &mut self.0[index]
+            }
+        }
+
+        // glsl scalar broadcast ops
+
+        // glsl vector broadcast ops (EXCEPT MUL, THATS THE NEXT ONE)
+
+        // glsl dot product vector broadcast ops
+        // signatures are Vec * Mat
+
+        // glsl vec mat matmul 
+        // signatures are Mat * Vec
+    };
+}
+
+mat_gen!(Mat2 => Vec2 * 2);
+mat_gen!(Mat2x3 => Vec2 * 3);
+mat_gen!(Mat2x4 => Vec2 * 4);
+mat_gen!(Mat3x2 => Vec3 * 2);
+mat_gen!(Mat3 => Vec3 * 3);
+mat_gen!(Mat3x4 => Vec3 * 4);
+mat_gen!(Mat4x2 => Vec4 * 2);
+mat_gen!(Mat4x3 => Vec4 * 3);
+mat_gen!(Mat4 => Vec4 * 4);
+
+// transpose macro
+macro_rules! mat_t {
+    ($self:ident) => {
+        mat_t!($self => $self);
+    };
+
+    ($l:ident => $r:ident) => {
+        impl $l {
+            pub fn t(self) -> $r {
+                const _CHECK_ROW_COL: () = assert!($l::COLS == $r::ROWS && $l::ROWS == $r::COLS); 
+
+                let mut new = $r::default();
+                for i in 0..Self::COLS {
+                    for j in 0..Self::ROWS {
+                        new[j][i] = self[i][j];
+                    }
+                }
+                new
+            }
+        }
+    };
+}
+
+mat_t!(Mat2);
+mat_t!(Mat3);
+mat_t!(Mat4);
+
+mat_t!(Mat2x3 => Mat3x2);
+mat_t!(Mat2x4 => Mat4x2);
+mat_t!(Mat3x2 => Mat2x3);
+mat_t!(Mat3x4 => Mat4x3);
+mat_t!(Mat4x2 => Mat2x4);
+mat_t!(Mat4x3 => Mat3x4);
 
 // invert_t
 // let mut adjugate_t = Mat::default();
@@ -210,11 +245,8 @@ vec_gen!(Vec4 => 4);
 //     (0..I::USIZE).fold(0.0, |acc, i| acc + self[0][i] * self.cofactor(0, i))
 // }
 
-// indexing
-
 // standard ops aka add and sub
 
-// broadcast scalar
 
 // broadcast vector
 
