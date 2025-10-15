@@ -124,7 +124,7 @@ vec_gen!(Vec4 => 4, f32);
 
 // mat
 macro_rules! mat_gen {
-    ($name:ident => $vec_row:ident * $col_len:expr) => {
+    ($name:ident => $vec_row:ident ($type:ty) * $col_len:expr) => {
         // Construct this struct via $name::from or $name::default
         #[derive(Debug, Default, Clone, Copy, PartialEq)]
         pub struct $name([$vec_row; $col_len]);
@@ -165,26 +165,93 @@ macro_rules! mat_gen {
         }
 
         // glsl scalar broadcast ops
+        mat_broadcast_scalar!($name ($type) => Add (add), +);
+        mat_broadcast_scalar!($name ($type) => Sub (sub), -);
+        mat_broadcast_scalar!($name ($type) => Mul (mul), *);
+        mat_broadcast_scalar!($name ($type) => Div (div), /);
+        mat_broadcast_scalar!($name ($type) => Rem (rem), %);
 
-        // glsl vector broadcast ops (EXCEPT MUL, THATS THE NEXT ONE)
+        // glsl dot product via vector
+        // signature is Vec * Mat
+        impl Mul<$name> for $vec_row {
+            type Output = $vec_row;
 
-        // glsl dot product vector broadcast ops
-        // signatures are Vec * Mat
+            fn mul(self, rhs: $name) -> $vec_row {
+                let mut new = $vec_row::default();
+                for x in 0..$name::COLS {
+                    new[x] = self.dot(rhs[x]);
+                }
+                new
+            }
+        }
 
-        // glsl vec mat matmul 
-        // signatures are Mat * Vec
+        // glsl vec mat matmul
+        // signature is Mat * Vec
+        impl Mul<$vec_row> for $name {
+            type Output = $vec_row;
+
+            fn mul(self, rhs: $vec_row) -> $vec_row {
+                let mut new = $vec_row::default();
+                for row in 0..Self::ROWS {
+                    for col in 0..Self::COLS {
+                        new[col] += self[col][row] * rhs[col];
+                    }
+                }
+                new
+            }
+        }
+
+        // glsl mat standard broadcast ops (except matmul, tis a separate macro)
+        mat_broadcast_mat!($name => Add (add), +);
+        mat_broadcast_mat!($name => Sub (sub), +);
+        mat_broadcast_mat!($name => Div (div), +);
+        mat_broadcast_mat!($name => Rem (rem), +);
     };
 }
 
-mat_gen!(Mat2 => Vec2 * 2);
-mat_gen!(Mat2x3 => Vec2 * 3);
-mat_gen!(Mat2x4 => Vec2 * 4);
-mat_gen!(Mat3x2 => Vec3 * 2);
-mat_gen!(Mat3 => Vec3 * 3);
-mat_gen!(Mat3x4 => Vec3 * 4);
-mat_gen!(Mat4x2 => Vec4 * 2);
-mat_gen!(Mat4x3 => Vec4 * 3);
-mat_gen!(Mat4 => Vec4 * 4);
+macro_rules! mat_broadcast_scalar {
+    ($name:ident ($type:ty) => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
+        impl $trait_name<$type> for $name {
+            type Output = $name;
+
+            fn $trait_fn(mut self, rhs: $type) -> $name {
+                for x in 0..Self::COLS {
+                    for y in 0..Self::ROWS {
+                        self[x][y] = self[x][y] $op_by rhs;
+                    }
+                }
+                self
+            }
+        }
+    };
+}
+
+macro_rules! mat_broadcast_mat {
+    ($name:ident => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
+        impl $trait_name<$name> for $name {
+            type Output = $name;
+
+            fn $trait_fn(mut self, rhs: $name) -> $name {
+                for x in 0..Self::COLS {
+                    for y in 0..Self::ROWS {
+                        self[x][y] = self[x][y] $op_by rhs[x][y];
+                    }
+                }
+                self
+            }
+        }
+    };
+}
+
+mat_gen!(Mat2   => Vec2 (f32) * 2);
+mat_gen!(Mat2x3 => Vec2 (f32) * 3);
+mat_gen!(Mat2x4 => Vec2 (f32) * 4);
+mat_gen!(Mat3x2 => Vec3 (f32) * 2);
+mat_gen!(Mat3   => Vec3 (f32) * 3);
+mat_gen!(Mat3x4 => Vec3 (f32) * 4);
+mat_gen!(Mat4x2 => Vec4 (f32) * 2);
+mat_gen!(Mat4x3 => Vec4 (f32) * 3);
+mat_gen!(Mat4   => Vec4 (f32) * 4);
 
 // transpose macro
 macro_rules! mat_t {
@@ -195,7 +262,7 @@ macro_rules! mat_t {
     ($l:ident => $r:ident) => {
         impl $l {
             pub fn t(self) -> $r {
-                const _CHECK_ROW_COL: () = assert!($l::COLS == $r::ROWS && $l::ROWS == $r::COLS); 
+                const _CHECK_ROW_COL: () = assert!($l::COLS == $r::ROWS && $l::ROWS == $r::COLS);
 
                 let mut new = $r::default();
                 for i in 0..Self::COLS {
@@ -219,6 +286,25 @@ mat_t!(Mat3x2 => Mat2x3);
 mat_t!(Mat3x4 => Mat4x3);
 mat_t!(Mat4x2 => Mat2x4);
 mat_t!(Mat4x3 => Mat3x4);
+
+// matmul
+macro_rules! mat_mul {
+    ($lhs:ident * $rhs:ident = $out:ident) => {
+        
+    };
+}
+
+// let mut ret = Mat::new();
+// // [[f32; Y]; X] * [[f32; Y2]; Y] = [[f32; Y2]; X]
+// // self[X][Y] * rhs[Y][Y2] = new[X][Y2]
+// for x in 0..X::USIZE {
+//     for y in 0..Y::USIZE {
+//         for i in 0..M::USIZE {
+//             ret[x][y] += self[x][i] * rhs[i][y];
+//         }
+//     }
+// }
+// ret
 
 // invert_t
 // let mut adjugate_t = Mat::default();
@@ -245,20 +331,3 @@ mat_t!(Mat4x3 => Mat3x4);
 //     (0..I::USIZE).fold(0.0, |acc, i| acc + self[0][i] * self.cofactor(0, i))
 // }
 
-// standard ops aka add and sub
-
-
-// broadcast vector
-
-// matmul
-// let mut ret = Mat::new();
-// // [[f32; Y]; X] * [[f32; Y2]; Y] = [[f32; Y2]; X]
-// // self[X][Y] * rhs[Y][Y2] = new[X][Y2]
-// for x in 0..X::USIZE {
-//     for y in 0..Y::USIZE {
-//         for i in 0..M::USIZE {
-//             ret[x][y] += self[x][i] * rhs[i][y];
-//         }
-//     }
-// }
-// ret
