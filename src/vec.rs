@@ -2,23 +2,6 @@
 // Mat: a matrix of f32
 use std::ops::*;
 
-// access enums
-// basically: typestate spam via macros to index into vecs/mats with coords
-// How it would work is you have 3 seperate coords systems: XYZW, RGBA, and STPQ
-// where the first letter corresponds to [0], second corresponds to [1], and so on.
-// You can apply a bitwise or (X | Y) to each and get a combined access aka swizzling.
-// But, there is an issue: compile time checking and repeating characters (aka: XXYY).
-// The former can be fixed by only allowing certain typestates be indexable to certain vecs.
-// IE: XYZ can only index into xVec3 and xVec4, but not xVec2 due to size.
-// For such a thing to be done, each bitwise or will produce a new "combined" type.
-// Example:
-// (X | Y) => Vec2Access(X, Y)
-// (X | Z | Z) => (Vec2Access(X, Z) | Z) => Vec3Access(X, Z, Z)
-// These then return Vecs of their own, based on their size. This also conviently fixes the issue of
-// repeating characters, as each field of the struct is set to be that character.
-//
-// TODO
-
 macro_rules! vec_gen {
     ($name:ident => $size:expr, $type:ty) => {
         // Construct this struct via $name::from or $name::default
@@ -121,6 +104,54 @@ macro_rules! vec_broadcast_indivdual_impl {
 vec_gen!(Vec2 => 2, f32);
 vec_gen!(Vec3 => 3, f32);
 vec_gen!(Vec4 => 4, f32);
+
+// access enums
+// basically: typestate spam via macros to index into vecs/mats with coords
+// How it would work is you have 3 seperate coords systems: XYZW, RGBA, and STPQ
+// where the first letter corresponds to [0], second corresponds to [1], and so on.
+// You can apply a bitwise or (X | Y) to each and get a combined access aka swizzling.
+// But, there is an issue: compile time checking and repeating characters (aka: XXYY).
+// The former can be fixed by only allowing certain typestates be indexable to certain vecs.
+// IE: XYZ can only index into xVec3 and xVec4, but not xVec2 due to size.
+// For such a thing to be done, each bitwise or will produce a new "combined" type.
+// Example:
+// (X | Y) => Vec2Access(X, Y)
+// (X | Z | Z) => (Vec2Access(X, Z) | Z) => Vec3Access(X, Z, Z)
+// These then return Vecs of their own, based on their size. This also conviently fixes the issue of
+// repeating characters, as each field of the struct is set to be that character.
+
+trait AccessEnum {
+    fn value(self) -> usize;
+}
+
+struct Vec2Access<T: AccessEnum>(pub T, pub T);
+
+
+
+macro_rules! access_enum {
+    ($name:ident => $zero:ident, $one:ident, $two:ident, $three:ident) => {
+        pub use $name::*;
+
+        #[repr(usize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum $name {
+            $zero = 0,
+            $one = 1,
+            $two = 2,
+            $three = 3,
+        }
+
+        impl AccessEnum for $name {
+            fn value(self) -> usize {
+                self as usize
+            }
+        }
+    };
+}
+
+access_enum!(XYZWCoord => X, Y, Z, W);
+access_enum!(RGBACoord => R, G, B, A);
+access_enum!(STPQCoord => S, T, P, W);
 
 // mat
 macro_rules! mat_gen {
