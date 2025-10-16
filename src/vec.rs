@@ -203,9 +203,9 @@ macro_rules! mat_gen {
 
         // glsl mat standard broadcast ops (except matmul, tis a separate macro)
         mat_broadcast_mat!($name => Add (add), +);
-        mat_broadcast_mat!($name => Sub (sub), +);
-        mat_broadcast_mat!($name => Div (div), +);
-        mat_broadcast_mat!($name => Rem (rem), +);
+        mat_broadcast_mat!($name => Sub (sub), -);
+        mat_broadcast_mat!($name => Div (div), /);
+        mat_broadcast_mat!($name => Rem (rem), %);
     };
 }
 
@@ -243,15 +243,15 @@ macro_rules! mat_broadcast_mat {
     };
 }
 
-mat_gen!(Mat2   => Vec2 (f32) * 2);
-mat_gen!(Mat2x3 => Vec2 (f32) * 3);
-mat_gen!(Mat2x4 => Vec2 (f32) * 4);
-mat_gen!(Mat3x2 => Vec3 (f32) * 2);
-mat_gen!(Mat3   => Vec3 (f32) * 3);
-mat_gen!(Mat3x4 => Vec3 (f32) * 4);
-mat_gen!(Mat4x2 => Vec4 (f32) * 2);
-mat_gen!(Mat4x3 => Vec4 (f32) * 3);
-mat_gen!(Mat4   => Vec4 (f32) * 4);
+mat_gen!(Mat2x2 => Vec2 (f32) * 2);
+mat_gen!(Mat2x3 => Vec3 (f32) * 2);
+mat_gen!(Mat2x4 => Vec4 (f32) * 2);
+mat_gen!(Mat3x2 => Vec2 (f32) * 3);
+mat_gen!(Mat3x3 => Vec3 (f32) * 3);
+mat_gen!(Mat3x4 => Vec4 (f32) * 3);
+mat_gen!(Mat4x2 => Vec2 (f32) * 4);
+mat_gen!(Mat4x3 => Vec3 (f32) * 4);
+mat_gen!(Mat4x4 => Vec4 (f32) * 4);
 
 // transpose macro
 macro_rules! mat_t {
@@ -276,9 +276,9 @@ macro_rules! mat_t {
     };
 }
 
-mat_t!(Mat2);
-mat_t!(Mat3);
-mat_t!(Mat4);
+mat_t!(Mat2x2);
+mat_t!(Mat3x3);
+mat_t!(Mat4x4);
 
 mat_t!(Mat2x3 => Mat3x2);
 mat_t!(Mat2x4 => Mat4x2);
@@ -290,44 +290,137 @@ mat_t!(Mat4x3 => Mat3x4);
 // matmul
 macro_rules! mat_mul {
     ($lhs:ident * $rhs:ident = $out:ident) => {
-        
+        impl Mul<$rhs> for $lhs {
+            type Output = $out;
+
+            fn mul(self, rhs: $rhs) -> $out {
+                const _ROW_COL_CHECK: () = assert!($lhs::COLS == $rhs::ROWS);
+                const _COLS_MATCH: () = assert!($lhs::ROWS == $out::ROWS);
+                const _ROWS_MATCH: () = assert!($rhs::COLS == $out::COLS);
+
+                let mut ret = $out::default();
+                for x in 0..$out::COLS {
+                    for y in 0..$out::ROWS {
+                        for i in 0..$lhs::COLS {
+                            ret[x][y] = self[i][x] * rhs[y][i];
+                        }
+                    }
+                }
+                ret
+            }
+        }
     };
 }
 
-// let mut ret = Mat::new();
-// // [[f32; Y]; X] * [[f32; Y2]; Y] = [[f32; Y2]; X]
-// // self[X][Y] * rhs[Y][Y2] = new[X][Y2]
-// for x in 0..X::USIZE {
-//     for y in 0..Y::USIZE {
-//         for i in 0..M::USIZE {
-//             ret[x][y] += self[x][i] * rhs[i][y];
-//         }
-//     }
-// }
-// ret
+mat_mul!(Mat2x2 * Mat2x2 = Mat2x2);
+mat_mul!(Mat2x2 * Mat3x2 = Mat3x2);
+mat_mul!(Mat2x2 * Mat4x2 = Mat4x2);
+mat_mul!(Mat2x3 * Mat2x2 = Mat2x3);
+mat_mul!(Mat2x3 * Mat3x2 = Mat3x3);
+mat_mul!(Mat2x3 * Mat4x2 = Mat4x3);
+mat_mul!(Mat2x4 * Mat2x2 = Mat2x4);
+mat_mul!(Mat2x4 * Mat3x2 = Mat3x4);
+mat_mul!(Mat2x4 * Mat4x2 = Mat4x4);
 
-// invert_t
-// let mut adjugate_t = Mat::default();
-// for i in 0..(I::USIZE - 1) {
-//     for j in 0..(I::USIZE - 1) {
-//         adjugate_t[i][j] = self.cofactor(i, j);
-//     }
-// }
-// adjugate_t.clone() / (adjugate_t[0].dot(&self[0]))
+mat_mul!(Mat3x2 * Mat2x3 = Mat2x2);
+mat_mul!(Mat3x2 * Mat3x3 = Mat3x2);
+mat_mul!(Mat3x2 * Mat4x3 = Mat4x2);
+mat_mul!(Mat3x3 * Mat2x3 = Mat2x3);
+mat_mul!(Mat3x3 * Mat3x3 = Mat3x3);
+mat_mul!(Mat3x3 * Mat4x3 = Mat4x3);
+mat_mul!(Mat3x4 * Mat2x3 = Mat2x4);
+mat_mul!(Mat3x4 * Mat3x3 = Mat3x4);
+mat_mul!(Mat3x4 * Mat4x3 = Mat4x4);
 
-// cofactor
-// let mut submat = Mat::<<I as Sub<U1>>::Output, <I as Sub<U1>>::Output>::new();
-// for i in 0..(I::USIZE - 1) {
-//     for j in 0..(I::USIZE - 1) {
-//         submat[i][j] = self[i + ((i >= x) as usize)][j + ((j >= y) as usize)];
-//     }
-// }
-// submat.det() * (if (x + y) % 2 == 1 { -1. } else { 1. })
+mat_mul!(Mat4x2 * Mat2x4 = Mat2x2);
+mat_mul!(Mat4x2 * Mat3x4 = Mat3x2);
+mat_mul!(Mat4x2 * Mat4x4 = Mat4x2);
+mat_mul!(Mat4x3 * Mat2x4 = Mat2x3);
+mat_mul!(Mat4x3 * Mat3x4 = Mat3x3);
+mat_mul!(Mat4x3 * Mat4x4 = Mat4x3);
+mat_mul!(Mat4x4 * Mat2x4 = Mat2x4);
+mat_mul!(Mat4x4 * Mat3x4 = Mat3x4);
+mat_mul!(Mat4x4 * Mat4x4 = Mat4x4);
 
-// det
-// if const { I::USIZE == 1 } {
-//     self[0][0]
-// } else {
-//     (0..I::USIZE).fold(0.0, |acc, i| acc + self[0][i] * self.cofactor(0, i))
-// }
+// special functions and an alias for square mats
+macro_rules! square_mat {
+    ($name:ident ($alias:ident) => $typ:ident) => {
+        pub type $alias = $name;
 
+        impl $name {
+            const _IS_SQUARE: () = assert!(Self::COLS == Self::ROWS);
+            pub const I: usize = Self::COLS;
+
+            pub fn identity() -> Self {
+                let mut ret = Self::default();
+                for x in 0..Self::COLS {
+                    for y in 0..Self::ROWS {
+                        ret[x][y] = 1.0;
+                    }
+                }
+                ret
+            }
+
+            pub fn invert_t(self) -> Self {
+                let mut adjugate_t = Self::default();
+                for i in 0..(Self::I - 1) {
+                    for j in 0..(Self::I - 1) {
+                        adjugate_t[i][j] = self.cofactor(i, j);
+                    }
+                }
+                adjugate_t.clone() / (adjugate_t[0].dot(self[0]))
+            }
+
+            pub fn invert(self) -> Self {
+                self.invert_t().t()
+            }
+
+            // This is technically incorrect as a det would account for when I is 1 (Mat1 aka scalar)
+            // but due to Mat2 being just above Mat1, that special case is handled there instead
+            pub fn det(self) -> $typ {
+                (0..Self::I).fold(0.0f32, |acc, i| acc + self[i][0] * self.cofactor(i, 0))
+            }
+        }
+    };
+}
+
+square_mat!(Mat2x2(Mat2) => f32);
+square_mat!(Mat3x3(Mat3) => f32);
+square_mat!(Mat4x4(Mat4) => f32);
+
+// then we have the inversion stuffs
+macro_rules! cofactor_mat {
+    ($name:ident ($typ:ident) > $lower:ident ) => {
+        impl $name {
+            const _IS_ONE_LOWER: () = assert!(Self::I == $lower::I + 1);
+
+            pub fn cofactor(self, x: usize, y: usize) -> $typ {
+                let mut submat = $lower::default();
+                for i in 0..(Self::I - 1) {
+                    for j in 0..(Self::I - 1) {
+                        submat[i][j] = self[i + ((i >= x) as usize)][j + ((j >= y) as usize)];
+                    }
+                }
+                submat.det() * (if (x + y) % 2 == 1 { -1. } else { 1. })
+            }
+        }
+    };
+
+    // only for Mat2, as below it is a scalar
+    ($name:ident ($typ:ident)) => {
+        impl $name {
+            const _LOWEST_ONLY: () = assert!(Self::I - 1 == 1);
+
+            pub fn cofactor(self, x: usize, y: usize) -> $typ {
+                // Since this only leads to a scalar, manually extract it from the mat.
+                // Note that cofactors *only* have everything except the selected rows, so
+                // invert I over each selection and you have the scalar.
+                self[Self::I - x][Self::I - y] * (if (x + y) % 2 == 1 { -1. } else { 1. })
+            }
+        }
+    };
+}
+
+cofactor_mat!(Mat2(f32));
+cofactor_mat!(Mat3(f32) > Mat2);
+cofactor_mat!(Mat4(f32) > Mat3);
