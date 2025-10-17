@@ -120,18 +120,36 @@ vec_gen!(Vec4 => 4, f32);
 // These then return Vecs of their own, based on their size. This also conviently fixes the issue of
 // repeating characters, as each field of the struct is set to be that character.
 
-trait AccessEnum {
+// generic type stuffs
+pub trait AccessEnum {
     fn value(self) -> usize;
 }
 
-struct Vec2Access<T: AccessEnum>(pub T, pub T);
+pub struct Vec2Access<T: AccessEnum>(pub T, pub T);
+pub struct Vec3Access<T: AccessEnum>(pub T, pub T, pub T);
+pub struct Vec4Access<T: AccessEnum>(pub T, pub T, pub T, pub T);
 
+// magic that does the combining
+impl<T: AccessEnum> BitOr<T> for Vec2Access<T> {
+    type Output = Vec3Access<T>;
 
+    fn bitor(self, new: T) -> Vec3Access<T> {
+        Vec3Access(self.0, self.1, new)
+    }
+}
 
+impl<T: AccessEnum> BitOr<T> for Vec3Access<T> {
+    type Output = Vec4Access<T>;
+
+    fn bitor(self, new: T) -> Vec4Access<T> {
+        Vec4Access(self.0, self.1, self.2, new)
+    }
+}
+
+// the enums themselves
 macro_rules! access_enum {
     ($name:ident => $zero:ident, $one:ident, $two:ident, $three:ident) => {
-        pub use $name::*;
-
+        // state for the access
         #[repr(usize)]
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum $name {
@@ -141,7 +159,17 @@ macro_rules! access_enum {
             $three = 3,
         }
 
+        // init for the bitor combining ops
+        impl BitOr<$name> for $name {
+            type Output = Vec2Access<$name>;
+
+            fn bitor(self, new: $name) -> Vec2Access<$name> {
+                Vec2Access(self, new)
+            }
+        }
+
         impl AccessEnum for $name {
+            // index of the access
             fn value(self) -> usize {
                 self as usize
             }
@@ -152,6 +180,11 @@ macro_rules! access_enum {
 access_enum!(XYZWCoord => X, Y, Z, W);
 access_enum!(RGBACoord => R, G, B, A);
 access_enum!(STPQCoord => S, T, P, W);
+
+// This is where the fun begins.
+// Because index(mut) creates a (mut) reference, we have to return a special object
+// that acts as a (mut) reference to the appropriate items
+// My current idea? Create a const/mut pointer with a (mut) ref back to the vec. 
 
 // mat
 macro_rules! mat_gen {
