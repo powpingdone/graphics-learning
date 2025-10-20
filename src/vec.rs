@@ -117,74 +117,70 @@ vec_gen!(Vec4 => 4, f32);
 // Example:
 // (X | Y) => Vec2Access(X, Y)
 // (X | Z | Z) => (Vec2Access(X, Z) | Z) => Vec3Access(X, Z, Z)
-// These then return Vecs of their own, based on their size. This also conviently fixes the issue of
-// repeating characters, as each field of the struct is set to be that character.
 
-// generic type stuffs
-pub trait AccessEnum {
-    fn value(self) -> usize;
+// Marker trait for "can Index up to four fields"
+trait GroupIdx4 {
+    const GROUP: &'static str; 
 }
 
-pub struct Vec2Access<T: AccessEnum>(pub T, pub T);
-pub struct Vec3Access<T: AccessEnum>(pub T, pub T, pub T);
-pub struct Vec4Access<T: AccessEnum>(pub T, pub T, pub T, pub T);
+// Marker trait for "can Index up to three fields"
+trait GroupIdx3: GroupIdx4 { }
+// Marker trait for "can Index up to two fields"
+trait GroupIdx2: GroupIdx3 { }
 
-// magic that does the combining
-impl<T: AccessEnum> BitOr<T> for Vec2Access<T> {
-    type Output = Vec3Access<T>;
+// Structs to model Indexing
+pub struct VecIdx2<One, Two>(One, Two)
+where
+One: GroupIdx4,
+Two: GroupIdx4;
 
-    fn bitor(self, new: T) -> Vec3Access<T> {
-        Vec3Access(self.0, self.1, new)
-    }
-}
+macro_rules! index_gen {
+    (($group:ident): $one:ident, $two:ident, $three:ident, $four:ident) => {
+        pub struct $one;
+        pub struct $two;
+        pub struct $three;
+        pub struct $four;
 
-impl<T: AccessEnum> BitOr<T> for Vec3Access<T> {
-    type Output = Vec4Access<T>;
-
-    fn bitor(self, new: T) -> Vec4Access<T> {
-        Vec4Access(self.0, self.1, self.2, new)
-    }
-}
-
-// the enums themselves
-macro_rules! access_enum {
-    ($name:ident => $zero:ident, $one:ident, $two:ident, $three:ident) => {
-        // state for the access
-        #[repr(usize)]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum $name {
-            $zero = 0,
-            $one = 1,
-            $two = 2,
-            $three = 3,
-        }
-
-        // init for the bitor combining ops
-        impl BitOr<$name> for $name {
-            type Output = Vec2Access<$name>;
-
-            fn bitor(self, new: $name) -> Vec2Access<$name> {
-                Vec2Access(self, new)
-            }
-        }
-
-        impl AccessEnum for $name {
-            // index of the access
-            fn value(self) -> usize {
-                self as usize
-            }
-        }
+        pub struct $group;
+        
+        index_bitor!($one $two $three $four);
     };
 }
 
-access_enum!(XYZWCoord => X, Y, Z, W);
-access_enum!(RGBACoord => R, G, B, A);
-access_enum!(STPQCoord => S, T, P, W);
+macro_rules! index_bitor {
+    ($sing:ident) => {
+        impl BitOr for $sing {
+            type Output = VecIdx2;
 
-// This is where the fun begins.
-// Because index(mut) creates a (mut) reference, we have to return a special object
-// that acts as a (mut) reference to the appropriate items
-// My current idea? Create a const/mut pointer with a (mut) ref back to the vec. 
+            fn bitor(self, rhs: $sing) -> VecIdx2 {
+                todo!()
+            }
+        }
+    };
+
+    () => {};
+    
+    ($lhs:ident $($rhs:ident)*) => {
+        index_bitor!($lhs);
+        index_bitor!($($rhs)*);
+    };
+}
+
+index_gen!((XYZW): X, Y, Z, W);
+
+// Notes on assign:
+// In any other situation, if we're being normally rusty and not messing
+// with mutable state, then we do exprs like this:
+// ```rust
+// let var = Vec2::from([1., 2.]);
+// let var = var[X | X]; // var is now (1., 1.)
+// ```
+// However, with mutable state, we now have an issue due to the fact that rust
+// does not have a "assign" op that is overrideable. Even if we were to use
+// the *Assign op traits with fun type system things, we still have the issue
+// that the regular assign wouldn't work. This, unfortunately, requires a macro to
+// solve.
+
 
 // mat
 macro_rules! mat_gen {
