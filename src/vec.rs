@@ -1,23 +1,23 @@
 // Vect: a vector of f32
 // Mat: a matrix of f32
+use std::marker::PhantomData;
+use std::any::TypeId;
 use std::ops::*;
 
 macro_rules! vec_gen {
     ($name:ident => $size:expr, $type:ty) => {
         // Construct this struct via $name::from or $name::default
         #[derive(Debug, Default, Clone, Copy, PartialEq)]
-        pub struct $name([$type; $size]);
+        pub struct $name<'a>([$type; $size], PhantomData<&'a u8>);
 
-        impl $name {
+        impl<'a> $name<'a> {
             pub const LEN: usize = $size;
 
             pub const fn len(&self) -> usize {
                 Self::LEN
             }
-        }
 
-        // dot product
-        impl $name {
+            // dot product
             pub fn dot(&self, rhs: $name) -> $type {
                 self.0
                     .iter()
@@ -27,14 +27,14 @@ macro_rules! vec_gen {
         }
 
         // common traits
-        impl From<[$type; $size]> for $name {
+        impl<'a> From<[$type; $size]> for $name<'a> {
             fn from(i: [$type; $size]) -> Self {
-                Self(i)
+                Self(i, PhantomData)
             }
         }
 
         // indexing
-        impl Index<usize> for $name {
+        impl<'a> Index<usize> for $name<'a> {
             type Output = $type;
 
             fn index(&self, index: usize) -> &$type {
@@ -42,7 +42,7 @@ macro_rules! vec_gen {
             }
         }
 
-        impl IndexMut<usize> for $name {
+        impl<'a> IndexMut<usize> for $name<'a> {
             fn index_mut(&mut self, index: usize) -> &mut $type {
                 &mut self.0[index]
             }
@@ -75,27 +75,27 @@ macro_rules! vec_broadcast_op {
 
 macro_rules! vec_broadcast_indivdual_impl {
     ($name:ident ($type:ty) => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
-        impl $trait_name<$type> for $name {
-            type Output = $name;
+        impl<'a> $trait_name<$type> for $name<'a> {
+            type Output = $name<'a>;
 
-            fn $trait_fn(mut self, rhs: $type) -> $name {
+            fn $trait_fn(mut self, rhs: $type) -> $name<'a> {
                 for x in 0..Self::LEN {
                     self[x] = self[x] $op_by rhs;
                 }
-                self
+                $name::from(self.0)
             }
         }
     };
 
     ($name:ident => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
-        impl $trait_name<$name> for $name {
-            type Output = $name;
+        impl<'a, 'b, 'c> $trait_name<$name<'b>> for $name<'a> {
+            type Output = $name<'c>;
 
-            fn $trait_fn(mut self, rhs: Self) -> $name {
+            fn $trait_fn(mut self, rhs: $name<'b>) -> $name<'c> {
                 for x in 0..Self::LEN {
                     self[x] = self[x] $op_by rhs[x];
                 }
-                self
+                $name::<'c>::from(self.0)
             }
         }
     };
@@ -118,21 +118,94 @@ vec_gen!(Vec4 => 4, f32);
 // (X | Y) => Vec2Access(X, Y)
 // (X | Z | Z) => (Vec2Access(X, Z) | Z) => Vec3Access(X, Z, Z)
 
-// Marker trait for "can Index up to four fields"
-trait GroupIdx4 {
-    const GROUP: &'static str; 
+// Marker trait for "can Index up to four fields" (X, Y, Z, W)
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a indexable struct, or does the group does not match"
+)]
+pub trait GroupIdx4 {
+    type Group;
+
+    fn idx(self) -> usize;
 }
 
-// Marker trait for "can Index up to three fields"
-trait GroupIdx3: GroupIdx4 { }
-// Marker trait for "can Index up to two fields"
-trait GroupIdx2: GroupIdx3 { }
+// Marker trait for "can Index up to three fields" (X, Y, Z)
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is indexing into a \"vec\" whose size is 3 but `{Self}` expects a greater size"
+)]
+pub trait GroupIdx3: GroupIdx4 {}
+// Marker trait for "can Index up to two fields" (X, Y)
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is indexing into a \"vec\" whose size is 2 but `{Self}` expects a greater size"
+)]
+pub trait GroupIdx2: GroupIdx3 {}
 
 // Structs to model Indexing
 pub struct VecIdx2<One, Two>(One, Two)
 where
-One: GroupIdx4,
-Two: GroupIdx4;
+    One: GroupIdx4,
+    // this pattern here is repeated a lot, tl;dr it makes sure that the group
+    // is the same for each idx type
+    Two: GroupIdx4<Group = One::Group>;
+
+impl<One, Two> VecIdx2<One, Two>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+{
+    // create a new fn
+    pub fn new(lhs: One, rhs: Two) -> Self {
+        VecIdx2(lhs, rhs)
+    }
+
+    // deconstruct it to indexes
+    pub fn decompose(self) -> (usize, usize) {
+        (self.0.idx(), self.1.idx())
+    }
+}
+
+pub struct VecIdx3<One, Two, Three>(One, Two, Three)
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>;
+
+impl<One, Two, Three> VecIdx3<One, Two, Three>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>,
+{
+    pub fn new(lhs: VecIdx2<One, Two>, rhs: Three) -> Self {
+        VecIdx3(lhs.0, lhs.1, rhs)
+    }
+
+    pub fn decompose(self) -> (usize, usize, usize) {
+        (self.0.idx(), self.1.idx(), self.2.idx())
+    }
+}
+
+pub struct VecIdx4<One, Two, Three, Four>(One, Two, Three, Four)
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>,
+    Four: GroupIdx4<Group = Three::Group>;
+
+impl<One, Two, Three, Four> VecIdx4<One, Two, Three, Four>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>,
+    Four: GroupIdx4<Group = Three::Group>,
+{
+    pub fn new(lhs: VecIdx3<One, Two, Three>, rhs: Four) -> Self {
+        VecIdx4(lhs.0, lhs.1, lhs.2, rhs)
+    }
+
+    pub fn decompose(self) -> (usize, usize, usize, usize) {
+        (self.0.idx(), self.1.idx(), self.2.idx(), self.3.idx())
+    }
+}
 
 macro_rules! index_gen {
     (($group:ident): $one:ident, $two:ident, $three:ident, $four:ident) => {
@@ -142,7 +215,37 @@ macro_rules! index_gen {
         pub struct $four;
 
         pub struct $group;
-        
+
+        impl GroupIdx4 for $one {
+            type Group = $group;
+            fn idx(self) -> usize { 1 }
+        }
+
+        impl GroupIdx4 for $two {
+            type Group = $group;
+            fn idx(self) -> usize { 2 }
+        }
+
+        impl GroupIdx4 for $three {
+            type Group = $group;
+            fn idx(self) -> usize { 3 }
+        }
+
+        impl GroupIdx4 for $four {
+            type Group = $group;
+            fn idx(self) -> usize { 4 }
+        }
+
+        impl GroupIdx3 for $one {}
+
+        impl GroupIdx3 for $two {}
+
+        impl GroupIdx3 for $three {}
+
+        impl GroupIdx2 for $one {}
+
+        impl GroupIdx2 for $two {}
+
         index_bitor!($one $two $three $four);
     };
 }
@@ -150,23 +253,58 @@ macro_rules! index_gen {
 macro_rules! index_bitor {
     ($sing:ident) => {
         impl BitOr for $sing {
-            type Output = VecIdx2;
+            type Output = VecIdx2<$sing, $sing>;
 
-            fn bitor(self, rhs: $sing) -> VecIdx2 {
-                todo!()
+            fn bitor(self, rhs: $sing) -> VecIdx2<$sing, $sing> {
+                VecIdx2::new(self, rhs)
             }
         }
     };
 
-    () => {};
-    
     ($lhs:ident $($rhs:ident)*) => {
+        // bitor self
         index_bitor!($lhs);
+        // recurse: bitor the next items
         index_bitor!($($rhs)*);
+
+        $(
+            // the actual repeat impls
+            impl BitOr<$rhs> for $lhs {
+                type Output = VecIdx2<$lhs, $rhs>;
+
+                fn bitor(self, rhs: $rhs) -> VecIdx2<$lhs, $rhs> {
+                    VecIdx2::new(self, rhs)
+                }
+            }
+
+            impl BitOr<$lhs> for $rhs {
+                type Output = VecIdx2<$rhs, $lhs>;
+
+                fn bitor(self, rhs: $lhs) -> VecIdx2<$rhs, $lhs> {
+                    VecIdx2::new(self, rhs)
+                }
+            }
+        )*
     };
 }
 
 index_gen!((XYZW): X, Y, Z, W);
+index_gen!((RGBA): R, G, B, A);
+index_gen!((STPQ): S, T, P, Q);
+
+pub struct Vec2View<'parent>(&'parent f32, &'parent f32);
+
+impl<'a, One, Two> Index<VecIdx2<One, Two>> for Vec2
+where
+    One: GroupIdx4 + GroupIdx3 + GroupIdx2,
+    Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+{
+    type Output = Vec2View<'a>;
+
+    fn index(&self, index: VecIdx2<One, Two>) -> &Self::Output {
+        let (l,r) = index.decompose();
+    }
+}
 
 // Notes on assign:
 // In any other situation, if we're being normally rusty and not messing
@@ -180,7 +318,6 @@ index_gen!((XYZW): X, Y, Z, W);
 // the *Assign op traits with fun type system things, we still have the issue
 // that the regular assign wouldn't work. This, unfortunately, requires a macro to
 // solve.
-
 
 // mat
 macro_rules! mat_gen {
