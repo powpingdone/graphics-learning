@@ -1,16 +1,16 @@
 // Vect: a vector of f32
 // Mat: a matrix of f32
-use std::marker::PhantomData;
 use std::any::TypeId;
+use std::marker::PhantomData;
 use std::ops::*;
 
 macro_rules! vec_gen {
     ($name:ident => $size:expr, $type:ty) => {
         // Construct this struct via $name::from or $name::default
         #[derive(Debug, Default, Clone, Copy, PartialEq)]
-        pub struct $name<'a>([$type; $size], PhantomData<&'a u8>);
+        pub struct $name([$type; $size]);
 
-        impl<'a> $name<'a> {
+        impl $name {
             pub const LEN: usize = $size;
 
             pub const fn len(&self) -> usize {
@@ -27,14 +27,14 @@ macro_rules! vec_gen {
         }
 
         // common traits
-        impl<'a> From<[$type; $size]> for $name<'a> {
+        impl From<[$type; $size]> for $name {
             fn from(i: [$type; $size]) -> Self {
-                Self(i, PhantomData)
+                Self(i)
             }
         }
 
         // indexing
-        impl<'a> Index<usize> for $name<'a> {
+        impl Index<usize> for $name {
             type Output = $type;
 
             fn index(&self, index: usize) -> &$type {
@@ -42,7 +42,7 @@ macro_rules! vec_gen {
             }
         }
 
-        impl<'a> IndexMut<usize> for $name<'a> {
+        impl IndexMut<usize> for $name {
             fn index_mut(&mut self, index: usize) -> &mut $type {
                 &mut self.0[index]
             }
@@ -75,10 +75,10 @@ macro_rules! vec_broadcast_op {
 
 macro_rules! vec_broadcast_indivdual_impl {
     ($name:ident ($type:ty) => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
-        impl<'a> $trait_name<$type> for $name<'a> {
-            type Output = $name<'a>;
+        impl $trait_name<$type> for $name {
+            type Output = $name;
 
-            fn $trait_fn(mut self, rhs: $type) -> $name<'a> {
+            fn $trait_fn(mut self, rhs: $type) -> $name {
                 for x in 0..Self::LEN {
                     self[x] = self[x] $op_by rhs;
                 }
@@ -88,14 +88,14 @@ macro_rules! vec_broadcast_indivdual_impl {
     };
 
     ($name:ident => $trait_name:ident ($trait_fn:ident), $op_by:tt) => {
-        impl<'a, 'b, 'c> $trait_name<$name<'b>> for $name<'a> {
-            type Output = $name<'c>;
+        impl $trait_name<$name> for $name {
+            type Output = $name;
 
-            fn $trait_fn(mut self, rhs: $name<'b>) -> $name<'c> {
+            fn $trait_fn(mut self, rhs: $name) -> $name {
                 for x in 0..Self::LEN {
                     self[x] = self[x] $op_by rhs[x];
                 }
-                $name::<'c>::from(self.0)
+                $name::from(self.0)
             }
         }
     };
@@ -139,6 +139,23 @@ pub trait GroupIdx3: GroupIdx4 {}
 )]
 pub trait GroupIdx2: GroupIdx3 {}
 
+// Marker trait for "This type has only indexes that can do the first three elements"
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` does not have indexing elements less than three",
+    note = "in a four component group (ABCD), the first two elements (ABC) are valid for this"
+)]
+pub trait ContainsOnlyIdx3 {}
+
+// Marker trait for "This type has only indexes that can do the first two elements"
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` does not have indexing elements less than two",
+    note = "in a four component group (ABCD), the first two elements (AB) are valid for this"
+)]
+pub trait ContainsOnlyIdx2 {}
+
+// There is not a ContainsOnlyIdx4, as all structs that would contain idx elements
+// will contain GroupIdx4 only
+
 // Structs to model Indexing
 pub struct VecIdx2<One, Two>(One, Two)
 where
@@ -157,10 +174,30 @@ where
         VecIdx2(lhs, rhs)
     }
 
-    // deconstruct it to indexes
-    pub fn decompose(self) -> (usize, usize) {
-        (self.0.idx(), self.1.idx())
+    // each of these has an associated vec size that can be filled
+    fn assoc_vec(&self) -> Vec2 {
+        Vec2::default()
     }
+
+    // deconstruct it to indexes
+    pub fn decompose(self) -> [usize; 2] {
+        [self.0.idx(), self.1.idx()]
+    }
+}
+
+// following two checks are for if the digits are of a certain, lower size
+impl<One, Two> ContainsOnlyIdx3 for VecIdx2<One, Two>
+where
+    One: GroupIdx4 + GroupIdx3,
+    Two: GroupIdx4<Group = One::Group> + GroupIdx3,
+{
+}
+
+impl<One, Two> ContainsOnlyIdx2 for VecIdx2<One, Two>
+where
+    One: GroupIdx4 + GroupIdx3 + GroupIdx2,
+    Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+{
 }
 
 pub struct VecIdx3<One, Two, Three>(One, Two, Three)
@@ -179,9 +216,29 @@ where
         VecIdx3(lhs.0, lhs.1, rhs)
     }
 
-    pub fn decompose(self) -> (usize, usize, usize) {
-        (self.0.idx(), self.1.idx(), self.2.idx())
+    fn assoc_vec(&self) -> Vec3 {
+        Vec3::default()
     }
+
+    pub fn decompose(self) -> [usize; 3] {
+        [self.0.idx(), self.1.idx(), self.2.idx()]
+    }
+}
+
+impl<One, Two, Three> ContainsOnlyIdx3 for VecIdx3<One, Two, Three>
+where
+    One: GroupIdx4 + GroupIdx3,
+    Two: GroupIdx4<Group = One::Group> + GroupIdx3,
+    Three: GroupIdx4<Group = Two::Group> + GroupIdx3,
+{
+}
+
+impl<One, Two, Three> ContainsOnlyIdx2 for VecIdx3<One, Two, Three>
+where
+    One: GroupIdx4 + GroupIdx3 + GroupIdx2,
+    Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+    Three: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+{
 }
 
 pub struct VecIdx4<One, Two, Three, Four>(One, Two, Three, Four)
@@ -202,37 +259,69 @@ where
         VecIdx4(lhs.0, lhs.1, lhs.2, rhs)
     }
 
-    pub fn decompose(self) -> (usize, usize, usize, usize) {
-        (self.0.idx(), self.1.idx(), self.2.idx(), self.3.idx())
+    fn assoc_vec(&self) -> Vec4 {
+        Vec4::default()
+    }
+
+    pub fn decompose(self) -> [usize; 4] {
+        [self.0.idx(), self.1.idx(), self.2.idx(), self.3.idx()]
     }
 }
 
+impl<One, Two, Three, Four> ContainsOnlyIdx3 for VecIdx4<One, Two, Three, Four>
+where
+    One: GroupIdx4 + GroupIdx3,
+    Two: GroupIdx4<Group = One::Group> + GroupIdx3,
+    Three: GroupIdx4<Group = Two::Group> + GroupIdx3,
+    Four: GroupIdx4<Group = Three::Group> + GroupIdx3,
+{
+}
+
+impl<One, Two, Three, Four> ContainsOnlyIdx2 for VecIdx4<One, Two, Three, Four>
+where
+    One: GroupIdx4 + GroupIdx3 + GroupIdx2,
+    Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+    Three: GroupIdx4<Group = Two::Group> + GroupIdx3 + GroupIdx2,
+    Four: GroupIdx4<Group = Three::Group> + GroupIdx3 + GroupIdx2,
+{
+}
+
+// struct generation
 macro_rules! index_gen {
     (($group:ident): $one:ident, $two:ident, $three:ident, $four:ident) => {
+        #[derive(Clone, Copy, Debug)]
         pub struct $one;
+        #[derive(Clone, Copy, Debug)]
         pub struct $two;
+        #[derive(Clone, Copy, Debug)]
         pub struct $three;
+        #[derive(Clone, Copy, Debug)]
         pub struct $four;
 
+        #[derive(Clone, Copy, Debug)]
         pub struct $group;
 
         impl GroupIdx4 for $one {
             type Group = $group;
+            #[inline(always)]
             fn idx(self) -> usize { 1 }
         }
 
         impl GroupIdx4 for $two {
             type Group = $group;
+            #[inline(always)]
             fn idx(self) -> usize { 2 }
         }
 
         impl GroupIdx4 for $three {
             type Group = $group;
+            #[inline(always)]
             fn idx(self) -> usize { 3 }
         }
 
         impl GroupIdx4 for $four {
             type Group = $group;
+            #[inline(always)]
             fn idx(self) -> usize { 4 }
         }
 
@@ -250,6 +339,8 @@ macro_rules! index_gen {
     };
 }
 
+struct NullZST;
+
 macro_rules! index_bitor {
     ($sing:ident) => {
         impl BitOr for $sing {
@@ -257,6 +348,14 @@ macro_rules! index_bitor {
 
             fn bitor(self, rhs: $sing) -> VecIdx2<$sing, $sing> {
                 VecIdx2::new(self, rhs)
+            }
+        }
+
+        impl BitOr<$sing> for NullZST {
+            type Output = $sing;
+
+            fn bitor(self, rhs: $sing) -> $sing {
+                rhs
             }
         }
     };
@@ -292,32 +391,122 @@ index_gen!((XYZW): X, Y, Z, W);
 index_gen!((RGBA): R, G, B, A);
 index_gen!((STPQ): S, T, P, Q);
 
-pub struct Vec2View<'parent>(&'parent f32, &'parent f32);
-
-impl<'a, One, Two> Index<VecIdx2<One, Two>> for Vec2
+impl<T> Index<T> for Vec2
 where
-    One: GroupIdx4 + GroupIdx3 + GroupIdx2,
-    Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+    T: GroupIdx4 + GroupIdx3 + GroupIdx2,
 {
-    type Output = Vec2View<'a>;
+    type Output = f32;
 
-    fn index(&self, index: VecIdx2<One, Two>) -> &Self::Output {
-        let (l,r) = index.decompose();
+    #[inline(always)]
+    fn index(&self, index: T) -> &Self::Output {
+        &self[index.idx()]
     }
 }
 
-// Notes on assign:
-// In any other situation, if we're being normally rusty and not messing
-// with mutable state, then we do exprs like this:
-// ```rust
-// let var = Vec2::from([1., 2.]);
-// let var = var[X | X]; // var is now (1., 1.)
-// ```
-// However, with mutable state, we now have an issue due to the fact that rust
-// does not have a "assign" op that is overrideable. Even if we were to use
-// the *Assign op traits with fun type system things, we still have the issue
-// that the regular assign wouldn't work. This, unfortunately, requires a macro to
-// solve.
+impl<T> Index<T> for Vec3
+where
+    T: GroupIdx4 + GroupIdx3,
+{
+    type Output = f32;
+
+    #[inline(always)]
+    fn index(&self, index: T) -> &Self::Output {
+        &self[index.idx()]
+    }
+}
+
+impl<T> Index<T> for Vec4
+where
+    T: GroupIdx4,
+{
+    type Output = f32;
+
+    #[inline(always)]
+    fn index(&self, index: T) -> &Self::Output {
+        &self[index.idx()]
+    }
+}
+
+// some specific vec defs for swizzling checks below
+impl Vec2 {
+    fn check_idx<T: ContainsOnlyIdx2>(&self, _: &T) {}
+
+    fn check_full<One, Two>(&self, i: &VecIdx2<One, Two>)
+    where
+        One: GroupIdx4 + GroupIdx3 + GroupIdx2,
+        Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+    {
+        self.check_idx(i)
+    }
+}
+
+impl Vec3 {
+    fn check_idx<T: ContainsOnlyIdx3>(&self, _: &T) {}
+    
+    fn check_full<One, Two, Three>(&self, i: &VecIdx3<One, Two, Three>)
+    where
+        One: GroupIdx4 + GroupIdx3 + GroupIdx2,
+        Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+        Three: GroupIdx4<Group = Two::Group> + GroupIdx3 + GroupIdx2,
+    {
+        self.check_idx(i)
+    }
+}
+
+impl Vec4 {
+    fn check_idx<T>(&self, _: &T) {}
+    
+    fn check_full<One, Two, Three, Four>(&self, i: &VecIdx4<One, Two, Three, Four>)
+    where
+        One: GroupIdx4 + GroupIdx3 + GroupIdx2,
+        Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
+        Three: GroupIdx4<Group = Two::Group> + GroupIdx3 + GroupIdx2,
+        Four: GroupIdx4<Group = Three::Group> + GroupIdx3 + GroupIdx2,
+    {
+        self.check_idx(i)
+    }
+}
+
+// Why swizzling alone needs a macro
+// TL;DR: Index returns a ref, and I don't know of a way
+// to sucessfully return that ref. So, some private functions are
+// created and then typechecked together.
+
+#[macro_export]
+macro_rules! swz {
+    ($lhs:ident[$($flag:ident)|*]) => {
+        // construct idx type normally
+        let decompose_group = NullZST $(| $flag)*;
+        // make associated vec size
+        let mut newvec = decompose_group.assoc_vec();
+        // then do typecheck if vec cannot be indexed higher (eg: only XY)
+        newvec.check_idx(&decompose_group);
+        // finally, construct newvec
+        for (e, i) in decompose_group.decompose().into_iter().enumerate() {
+            newvec[e] = $lhs[i];
+        }
+        newvec
+    };
+}
+
+// Why does assign need a macro?
+// Because Rust doesn't allow assign to be overridden.
+#[macro_export]
+macro_rules! swz_assign {
+    (*$lhs:ident[$($flag:ident)|*] = $rhs:expr) => {
+        // construct idx type normally
+        let decompose_group = NullZST $(| $flag)*;
+        // make associated vec size
+        let mut newvec = decompose_group.assoc_vec();
+        // then do typecheck if vec cannot be indexed higher (eg: only XY)
+        // and that it also is of a specific type
+        newvec.check_full(&decompose_group);
+        // finally, assign each item
+        for (e, x) in decompose_group.decompose().into_iter().zip($rhs) {
+            $lhs[e] = $rhs;
+        }
+    };
+}
 
 // mat
 macro_rules! mat_gen {
