@@ -1,7 +1,5 @@
 // Vect: a vector of f32
 // Mat: a matrix of f32
-use std::any::TypeId;
-use std::marker::PhantomData;
 use std::ops::*;
 
 macro_rules! vec_gen {
@@ -200,6 +198,7 @@ where
 {
 }
 
+// repeat above for idx3
 pub struct VecIdx3<One, Two, Three>(One, Two, Three)
 where
     One: GroupIdx4,
@@ -241,6 +240,7 @@ where
 {
 }
 
+// repeat above for idx4
 pub struct VecIdx4<One, Two, Three, Four>(One, Two, Three, Four)
 where
     One: GroupIdx4,
@@ -286,7 +286,42 @@ where
 {
 }
 
-// struct generation
+macro_rules! swiz_panic {
+    ($idx:ident (One, $($gen:ident),*): $typ:ident) => {
+        impl<One, $($gen),*> Index<$idx<One, $($gen),*>> for $typ 
+        where
+            One: GroupIdx4,
+            $($gen: GroupIdx4<Group = One::Group>),*
+        {
+            type Output = ();
+            
+            fn index(&self, _: $idx<One, $($gen),*>) -> &() {
+                const {
+                    panic!(
+                        "you cannot swizzle a Vec directly, use the `swz!` and `swz_assign!` macro instead"
+                    );
+                }
+                // This is intentional, as the previous line will always panic if this function is called.
+                // This is just to pass typechecking, because the real use of this function is to smuggle
+                // that const panic.
+                #[allow(unreachable_code)]
+                &()
+            }
+        }
+    };
+}
+
+swiz_panic!(VecIdx2 (One, Two): Vec2);
+swiz_panic!(VecIdx2 (One, Two): Vec3);
+swiz_panic!(VecIdx2 (One, Two): Vec4);
+swiz_panic!(VecIdx3 (One, Two, Three): Vec2);
+swiz_panic!(VecIdx3 (One, Two, Three): Vec3);
+swiz_panic!(VecIdx3 (One, Two, Three): Vec4);
+swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec2);
+swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec3);
+swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec4);
+
+// index struct generation
 macro_rules! index_gen {
     (($group:ident): $one:ident, $two:ident, $three:ident, $four:ident) => {
         #[derive(Clone, Copy, Debug)]
@@ -339,10 +374,12 @@ macro_rules! index_gen {
     };
 }
 
+// ZST to init macro repeats to bitor all structs together
 struct NullZST;
 
 macro_rules! index_bitor {
     ($sing:ident) => {
+        // Self struct
         impl BitOr for $sing {
             type Output = VecIdx2<$sing, $sing>;
 
@@ -361,7 +398,7 @@ macro_rules! index_bitor {
     };
 
     ($lhs:ident $($rhs:ident)*) => {
-        // bitor self
+        // bitor self and NullZST
         index_bitor!($lhs);
         // recurse: bitor the next items
         index_bitor!($($rhs)*);
@@ -429,9 +466,12 @@ where
 
 // some specific vec defs for swizzling checks below
 impl Vec2 {
+    // This function fails if the params are greater than what's indexable
     fn check_idx<T: ContainsOnlyIdx2>(&self, _: &T) {}
 
-    fn check_full<One, Two>(&self, i: &VecIdx2<One, Two>)
+    // This does the previous function in addition to checking if the two parameters
+    // are in the same group.
+    fn check_group_and_idx<One, Two>(&self, i: &VecIdx2<One, Two>)
     where
         One: GroupIdx4 + GroupIdx3 + GroupIdx2,
         Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
@@ -442,8 +482,8 @@ impl Vec2 {
 
 impl Vec3 {
     fn check_idx<T: ContainsOnlyIdx3>(&self, _: &T) {}
-    
-    fn check_full<One, Two, Three>(&self, i: &VecIdx3<One, Two, Three>)
+
+    fn check_group_and_idx<One, Two, Three>(&self, i: &VecIdx3<One, Two, Three>)
     where
         One: GroupIdx4 + GroupIdx3 + GroupIdx2,
         Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
@@ -455,8 +495,8 @@ impl Vec3 {
 
 impl Vec4 {
     fn check_idx<T>(&self, _: &T) {}
-    
-    fn check_full<One, Two, Three, Four>(&self, i: &VecIdx4<One, Two, Three, Four>)
+
+    fn check_group_and_idx<One, Two, Three, Four>(&self, i: &VecIdx4<One, Two, Three, Four>)
     where
         One: GroupIdx4 + GroupIdx3 + GroupIdx2,
         Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
@@ -479,8 +519,8 @@ macro_rules! swz {
         let decompose_group = NullZST $(| $flag)*;
         // make associated vec size
         let mut newvec = decompose_group.assoc_vec();
-        // then do typecheck if vec cannot be indexed higher (eg: only XY)
-        newvec.check_idx(&decompose_group);
+        // then do check if vec cannot be indexed higher (eg: only XY on a Vec2)
+        $lhs.check_idx(&decompose_group);
         // finally, construct newvec
         for (e, i) in decompose_group.decompose().into_iter().enumerate() {
             newvec[e] = $lhs[i];
@@ -498,9 +538,9 @@ macro_rules! swz_assign {
         let decompose_group = NullZST $(| $flag)*;
         // make associated vec size
         let mut newvec = decompose_group.assoc_vec();
-        // then do typecheck if vec cannot be indexed higher (eg: only XY)
+        // then do typecheck if vec cannot be indexed higher (eg: only XY on a Vec2)
         // and that it also is of a specific type
-        newvec.check_full(&decompose_group);
+        newvec.check_group_and_idx(&decompose_group);
         // finally, assign each item
         for (e, x) in decompose_group.decompose().into_iter().zip($rhs) {
             $lhs[e] = $rhs;
@@ -800,7 +840,7 @@ macro_rules! cofactor_mat {
             pub fn cofactor(self, x: usize, y: usize) -> $typ {
                 // Since this only leads to a scalar, manually extract it from the mat.
                 // Note that cofactors *only* have everything except the selected rows, so
-                // invert I over each selection and you have the scalar.
+                // invert I over the selection and you have the scalar.
                 self[Self::I - x][Self::I - y] * (if (x + y) % 2 == 1 { -1. } else { 1. })
             }
         }

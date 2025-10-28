@@ -1,4 +1,4 @@
-#![recursion_limit="128"]
+#![recursion_limit = "128"]
 use image::Rgb;
 use obj::Obj;
 use rayon::iter::IndexedParallelIterator;
@@ -9,22 +9,24 @@ use rayon::iter::ParallelIterator;
 mod vec;
 use crate::vec::*;
 
-struct V3 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+fn bay_tri_area(a: &Vec3, b: &Vec3, c: &Vec3) -> f32 {
+    0.5 * ((b[Y] - a[Y]) * (b[X] + a[X])
+        + (c[Y] - b[Y]) * (c[X] + b[X])
+        + (a[Y] - c[Y]) * (a[X] + c[X]))
 }
 
-fn bay_tri_area(a: &V3, b: &V3, c: &V3) -> f32 {
-    0.5 * ((b.y - a.y) * (b.x + a.x) + (c.y - b.y) * (c.x + b.x) + (a.y - c.y) * (a.x + c.x))
-}
-
-fn filled_triangle(img: &mut image::RgbImage, zbuf: &mut Vec<f32>, pt0: &V3, pt1: &V3, pt2: &V3) {
+fn filled_triangle(
+    img: &mut image::RgbImage,
+    zbuf: &mut Vec<f32>,
+    pt0: &Vec3,
+    pt1: &Vec3,
+    pt2: &Vec3,
+) {
     // make max bounding box
-    let min_x = pt0.x.min(pt1.x.min(pt2.x)) as u32;
-    let min_y = pt0.y.min(pt1.y.min(pt2.y)) as u32;
-    let max_x = pt0.x.max(pt1.x.max(pt2.x)) as u32 + 1;
-    let max_y = pt0.y.max(pt1.y.max(pt2.y)) as u32 + 1;
+    let min_x = pt0[X].min(pt1[X].min(pt2[X])) as u32;
+    let min_y = pt0[Y].min(pt1[Y].min(pt2[Y])) as u32;
+    let max_x = pt0[X].max(pt1[X].max(pt2[X])) as u32 + 1;
+    let max_y = pt0[Y].max(pt1[Y].max(pt2[Y])) as u32 + 1;
     let max_area = bay_tri_area(pt0, pt1, pt2);
     if max_area < 1.0 {
         return;
@@ -41,17 +43,13 @@ fn filled_triangle(img: &mut image::RgbImage, zbuf: &mut Vec<f32>, pt0: &V3, pt1
             *x >= min_x && *x < max_x && *y >= min_y && *y < max_y
         })
         .for_each(|((x, y, px), depth_px)| {
-            let px_gen = V3 {
-                x: x as f32,
-                y: y as f32,
-                z: 0.0,
-            };
+            let px_gen = Vec3::from([x as f32, y as f32, 0.0]);
             let a = bay_tri_area(&px_gen, pt1, pt2) / max_area;
             let b = bay_tri_area(&px_gen, pt2, pt0) / max_area;
             let c = bay_tri_area(&px_gen, pt0, pt1) / max_area;
 
             // depth buffer check
-            let depth = (a * pt0.z) + (b * pt1.z) + (c * pt2.z);
+            let depth = (a * pt0[Z]) + (b * pt1[Z]) + (c * pt2[Z]);
 
             // depth check and within triangle
             if depth > *depth_px && a > 0.0 && b > 0.0 && c > 0.0 {
@@ -84,28 +82,16 @@ fn main() {
         let pts = [face.0[0].0, face.0[1].0, face.0[2].0];
         let [vert0, vert1, vert2] = [verts[pts[0]], verts[pts[1]], verts[pts[2]]];
         // adjust points to canvas, pack into coords struct
-        let pt0 = V3 {
-            x: proj_x(vert0[0]),
-            y: proj_y(vert0[1]),
-            z: proj_z(vert0[2]),
-        };
-        let pt1 = V3 {
-            x: proj_x(vert1[0]),
-            y: proj_y(vert1[1]),
-            z: proj_z(vert1[2]),
-        };
-        let pt2 = V3 {
-            x: proj_x(vert2[0]),
-            y: proj_y(vert2[1]),
-            z: proj_z(vert2[2]),
-        };
+        let pt0 = Vec3::from([proj_x(vert0[0]), proj_y(vert0[1]), proj_z(vert0[2])]);
+        let pt1 = Vec3::from([proj_x(vert1[0]), proj_y(vert1[1]), proj_z(vert1[2])]);
+        let pt2 = Vec3::from([proj_x(vert2[0]), proj_y(vert2[1]), proj_z(vert2[2])]);
         // triangle
         filled_triangle(&mut img, &mut zbuf, &pt0, &pt1, &pt2);
     }
 
     // show output
     img.save("arf.tga").unwrap();
-    
+
     // show zbuf
     let zmin = zbuf
         .iter()
