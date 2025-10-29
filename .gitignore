@@ -1,3 +1,4 @@
+*.tga
 *~
 target/*
 .direnv/*

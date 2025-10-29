@@ -22,6 +22,19 @@ macro_rules! vec_gen {
                     .zip(rhs.0.iter())
                     .fold(Default::default(), |acc, x| acc + *x.0 * *x.1)
             }
+
+            // iterator conversions
+            pub fn iter(&'_ self) -> std::slice::Iter<'_, f32> {
+                self.0.iter()
+            }
+
+            pub fn iter_mut(&'_ mut self) -> std::slice::IterMut<'_, f32> {
+                self.0.iter_mut()
+            }
+
+            pub fn into_iter(self) -> std::array::IntoIter<f32, $size> {
+                self.0.into_iter()
+            }
         }
 
         // common traits
@@ -288,13 +301,13 @@ where
 
 macro_rules! swiz_panic {
     ($idx:ident (One, $($gen:ident),*): $typ:ident) => {
-        impl<One, $($gen),*> Index<$idx<One, $($gen),*>> for $typ 
+        impl<One, $($gen),*> Index<$idx<One, $($gen),*>> for $typ
         where
             One: GroupIdx4,
             $($gen: GroupIdx4<Group = One::Group>),*
         {
             type Output = ();
-            
+
             fn index(&self, _: $idx<One, $($gen),*>) -> &() {
                 const {
                     panic!(
@@ -339,25 +352,25 @@ macro_rules! index_gen {
         impl GroupIdx4 for $one {
             type Group = $group;
             #[inline(always)]
-            fn idx(self) -> usize { 1 }
+            fn idx(self) -> usize { 0 }
         }
 
         impl GroupIdx4 for $two {
             type Group = $group;
             #[inline(always)]
-            fn idx(self) -> usize { 2 }
+            fn idx(self) -> usize { 1 }
         }
 
         impl GroupIdx4 for $three {
             type Group = $group;
             #[inline(always)]
-            fn idx(self) -> usize { 3 }
+            fn idx(self) -> usize { 2 }
         }
 
         impl GroupIdx4 for $four {
             type Group = $group;
             #[inline(always)]
-            fn idx(self) -> usize { 4 }
+            fn idx(self) -> usize { 3 }
         }
 
         impl GroupIdx3 for $one {}
@@ -440,6 +453,16 @@ where
     }
 }
 
+impl<T> IndexMut<T> for Vec2
+where
+    T: GroupIdx4 + GroupIdx3 + GroupIdx2,
+{
+    #[inline(always)]
+    fn index_mut(&mut self, index: T) -> &mut Self::Output {
+        &mut self[index.idx()]
+    }
+}
+
 impl<T> Index<T> for Vec3
 where
     T: GroupIdx4 + GroupIdx3,
@@ -452,6 +475,16 @@ where
     }
 }
 
+impl<T> IndexMut<T> for Vec3
+where
+    T: GroupIdx4 + GroupIdx3,
+{
+    #[inline(always)]
+    fn index_mut(&mut self, index: T) -> &mut Self::Output {
+        &mut self[index.idx()]
+    }
+}
+
 impl<T> Index<T> for Vec4
 where
     T: GroupIdx4,
@@ -461,6 +494,16 @@ where
     #[inline(always)]
     fn index(&self, index: T) -> &Self::Output {
         &self[index.idx()]
+    }
+}
+
+impl<T> IndexMut<T> for Vec4
+where
+    T: GroupIdx4,
+{
+    #[inline(always)]
+    fn index_mut(&mut self, index: T) -> &mut Self::Output {
+        &mut self[index.idx()]
     }
 }
 
@@ -575,7 +618,17 @@ macro_rules! mat_gen {
             }
         }
 
-        // indexing
+        impl From<[[$type; $vec_row::LEN]; $col_len]> for $name {
+            fn from(i: [[$type; $vec_row::LEN]; $col_len]) -> Self {
+                let mut new: [$vec_row; $col_len] = Default::default();
+                for x in 0..i.len() {
+                    new[x] = $vec_row::from(i[x]);
+                }
+                Self::from(new)
+            }
+        }
+
+        // indexing, OF NOTE: indexing is COLS first
         impl Index<usize> for $name {
             type Output = $vec_row;
 
@@ -620,7 +673,7 @@ macro_rules! mat_gen {
                 let mut new = $vec_row::default();
                 for row in 0..Self::ROWS {
                     for col in 0..Self::COLS {
-                        new[col] += self[col][row] * rhs[col];
+                        new[row] += self[row][col] * rhs[col];
                     }
                 }
                 new
@@ -779,10 +832,8 @@ macro_rules! square_mat {
 
             pub fn identity() -> Self {
                 let mut ret = Self::default();
-                for x in 0..Self::COLS {
-                    for y in 0..Self::ROWS {
-                        ret[x][y] = 1.0;
-                    }
+                for i in 0..Self::COLS {
+                    ret[i][i] = 1.0;
                 }
                 ret
             }
