@@ -15,33 +15,28 @@ fn bay_tri_area(a: &Vec3, b: &Vec3, c: &Vec3) -> f32 {
         + (a[Y] - c[Y]) * (a[X] + c[X]))
 }
 
-fn rot3y(vec: Vec3, rot: f32) -> Vec3 {
-    let (rsin, rcos) = rot.sin_cos();
-    let mut rot = Mat3::identity();
-    rot[0][0] = rcos;
-    rot[2][0] = rsin;
-    rot[0][2] = -rsin;
-    rot[2][2] = rcos;
-    rot * vec
+fn project_perspective(vec: Vec3) -> Vec3 {
+    const CAMERA: f32 = 5.;
+    vec / (1. - (vec[Z] / CAMERA))
 }
 
-//fn rot3(vec: Vec3, rot: Vec3) -> Vec3 {
-//    let (alpha, beta, gamma) = (rot[Z], rot[Y], rot[X]);
-//    let (acos, bcos, gcos) = (alpha.cos(), beta.cos(), gamma.cos());
-//    let (asin, bsin, gsin) = (alpha.sin(), beta.sin(), gamma.sin());
-//    let mut rot = Mat3::default();
-//    // from https://en.wikipedia.org/wiki/Rotation_matrix#General_3D_rotations
-//    rot[0][0] = acos * bcos;
-//    rot[1][0] = acos * bsin * gsin - asin * gcos;
-//    rot[2][0] = acos * bsin * gcos + asin * gsin;
-//    rot[0][1] = asin * bcos;
-//    rot[1][1] = asin * bsin * gsin + acos * gcos;
-//    rot[2][1] = asin * bsin * gcos - acos * gsin;
-//    rot[0][2] = -bsin;
-//    rot[1][2] = bcos * gsin;
-//    rot[2][2] = bcos * gcos;
-//    rot * vec
-//}
+fn rot3(vec: Vec3, rot: Vec3) -> Vec3 {
+    let (alpha, beta, gamma) = (rot[Z], rot[Y], rot[X]);
+    let (acos, bcos, gcos) = (alpha.cos(), beta.cos(), gamma.cos());
+    let (asin, bsin, gsin) = (alpha.sin(), beta.sin(), gamma.sin());
+    let mut rot = Mat3::default();
+    // from https://en.wikipedia.org/wiki/Rotation_matrix#General_3D_rotations
+    rot[0][0] = acos * bcos;
+    rot[1][0] = acos * bsin * gsin - asin * gcos;
+    rot[2][0] = acos * bsin * gcos + asin * gsin;
+    rot[0][1] = asin * bcos;
+    rot[1][1] = asin * bsin * gsin + acos * gcos;
+    rot[2][1] = asin * bsin * gcos - acos * gsin;
+    rot[0][2] = -bsin;
+    rot[1][2] = bcos * gsin;
+    rot[2][2] = bcos * gcos;
+    rot * vec
+}
 
 fn filled_triangle(
     img: &mut image::RgbImage,
@@ -96,8 +91,6 @@ fn filled_triangle(
 
 // https://haqr.eu/tinyrenderer
 fn main() {
-    dbg!(Mat3::from([[3., 2., 5.], [2., 1., 0.], [4., -1., 1.]]) * Vec3::from([4., 2., 1.]));
-    return;
     let mut img = image::RgbImage::new(1024, 1024);
     let (width, height) = img.dimensions();
     let mut zbuf = vec![0f32; height as usize * width as usize];
@@ -122,10 +115,14 @@ fn main() {
         let pt1 = Vec3::from(vert1);
         let pt2 = Vec3::from(vert2);
         // rot
-        let roty = 30f32.to_radians();
-        let pt0 = rot3y(pt0, roty);
-        let pt1 = rot3y(pt1, roty);
-        let pt2 = rot3y(pt2, roty);
+        let roty = Vec3::from([0., 30f32.to_radians(), 0.]);
+        let pt0 = rot3(pt0, roty);
+        let pt1 = rot3(pt1, roty);
+        let pt2 = rot3(pt2, roty);
+        // perspective
+        let pt0 = project_perspective(pt0);
+        let pt1 = project_perspective(pt1);
+        let pt2 = project_perspective(pt2);
         // adjust points to canvas
         let pt0 = Vec3::from([proj_x(pt0[X]), proj_y(pt0[Y]), proj_z(pt0[Z])]);
         let pt1 = Vec3::from([proj_x(pt1[X]), proj_y(pt1[Y]), proj_z(pt1[Z])]);
