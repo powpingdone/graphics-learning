@@ -176,16 +176,6 @@ where
     pub fn new(lhs: One, rhs: Two) -> Self {
         VecIdx2(lhs, rhs)
     }
-
-    // each of these has an associated vec size that can be filled
-    fn assoc_vec(&self) -> Vec2 {
-        Vec2::default()
-    }
-
-    // deconstruct it to indexes
-    pub fn decompose(self) -> [usize; 2] {
-        [self.0.idx(), self.1.idx()]
-    }
 }
 
 // following two checks are for if the digits are of a certain, lower size
@@ -218,14 +208,6 @@ where
 {
     pub fn new(lhs: VecIdx2<One, Two>, rhs: Three) -> Self {
         VecIdx3(lhs.0, lhs.1, rhs)
-    }
-
-    fn assoc_vec(&self) -> Vec3 {
-        Vec3::default()
-    }
-
-    pub fn decompose(self) -> [usize; 3] {
-        [self.0.idx(), self.1.idx(), self.2.idx()]
     }
 }
 
@@ -263,14 +245,6 @@ where
     pub fn new(lhs: VecIdx3<One, Two, Three>, rhs: Four) -> Self {
         VecIdx4(lhs.0, lhs.1, lhs.2, rhs)
     }
-
-    fn assoc_vec(&self) -> Vec4 {
-        Vec4::default()
-    }
-
-    pub fn decompose(self) -> [usize; 4] {
-        [self.0.idx(), self.1.idx(), self.2.idx(), self.3.idx()]
-    }
 }
 
 impl<One, Two, Three, Four> ContainsOnlyIdx3 for VecIdx4<One, Two, Three, Four>
@@ -291,6 +265,38 @@ where
 {
 }
 
+// for simple indexing (no swiz), just use the idx()
+macro_rules! index_singlet {
+    ($ty:ident (GroupIdx4 $($group:ident)*)) => {
+        impl<T> Index<T> for $ty
+        where
+            T: GroupIdx4 $(+ $group)*,
+        {
+            type Output = f32;
+
+            #[inline(always)]
+            fn index(&self, index: T) -> &Self::Output {
+                &self[index.idx()]
+            }
+        }
+
+        impl<T> IndexMut<T> for $ty
+        where
+            T: GroupIdx4 $(+ $group)*,
+        {
+            #[inline(always)]
+            fn index_mut(&mut self, index: T) -> &mut Self::Output {
+                &mut self[index.idx()]
+            }
+        }
+    };
+}
+
+index_singlet!(Vec2(GroupIdx4 GroupIdx3 GroupIdx2));
+index_singlet!(Vec3(GroupIdx4 GroupIdx3));
+index_singlet!(Vec4(GroupIdx4));
+
+// otherwise, error out
 macro_rules! swiz_panic {
     ($idx:ident (One, $($gen:ident),*): $typ:ident) => {
         impl<One, $($gen),*> Index<$idx<One, $($gen),*>> for $typ
@@ -304,13 +310,8 @@ macro_rules! swiz_panic {
                 const {
                     panic!(
                         "you cannot swizzle/splat a Vec using indexing, use `swiz()` or `splat()`"
-                    );
+                    )
                 }
-                // This is intentional, as the previous line will always panic if this function is called.
-                // This is just to pass typechecking, because the real use of this function is to smuggle
-                // that const panic.
-                #[allow(unreachable_code)]
-                &()
             }
         }
     };
@@ -432,115 +433,6 @@ macro_rules! index_bitor {
 index_gen!((XYZW): X, Y, Z, W);
 index_gen!((RGBA): R, G, B, A);
 index_gen!((STPQ): S, T, P, Q);
-
-impl<T> Index<T> for Vec2
-where
-    T: GroupIdx4 + GroupIdx3 + GroupIdx2,
-{
-    type Output = f32;
-
-    #[inline(always)]
-    fn index(&self, index: T) -> &Self::Output {
-        &self[index.idx()]
-    }
-}
-
-impl<T> IndexMut<T> for Vec2
-where
-    T: GroupIdx4 + GroupIdx3 + GroupIdx2,
-{
-    #[inline(always)]
-    fn index_mut(&mut self, index: T) -> &mut Self::Output {
-        &mut self[index.idx()]
-    }
-}
-
-impl<T> Index<T> for Vec3
-where
-    T: GroupIdx4 + GroupIdx3,
-{
-    type Output = f32;
-
-    #[inline(always)]
-    fn index(&self, index: T) -> &Self::Output {
-        &self[index.idx()]
-    }
-}
-
-impl<T> IndexMut<T> for Vec3
-where
-    T: GroupIdx4 + GroupIdx3,
-{
-    #[inline(always)]
-    fn index_mut(&mut self, index: T) -> &mut Self::Output {
-        &mut self[index.idx()]
-    }
-}
-
-impl<T> Index<T> for Vec4
-where
-    T: GroupIdx4,
-{
-    type Output = f32;
-
-    #[inline(always)]
-    fn index(&self, index: T) -> &Self::Output {
-        &self[index.idx()]
-    }
-}
-
-impl<T> IndexMut<T> for Vec4
-where
-    T: GroupIdx4,
-{
-    #[inline(always)]
-    fn index_mut(&mut self, index: T) -> &mut Self::Output {
-        &mut self[index.idx()]
-    }
-}
-
-// some specific vec defs for swizzling checks below
-impl Vec2 {
-    // This function fails if the params are greater than what's indexable
-    fn check_idx<T: ContainsOnlyIdx2>(&self, _: &T) {}
-
-    // This does the previous function in addition to checking if the two parameters
-    // are in the same group.
-    fn check_group_and_idx<One, Two>(&self, i: &VecIdx2<One, Two>)
-    where
-        One: GroupIdx4 + GroupIdx3 + GroupIdx2,
-        Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
-    {
-        self.check_idx(i)
-    }
-}
-
-impl Vec3 {
-    fn check_idx<T: ContainsOnlyIdx3>(&self, _: &T) {}
-
-    fn check_group_and_idx<One, Two, Three>(&self, i: &VecIdx3<One, Two, Three>)
-    where
-        One: GroupIdx4 + GroupIdx3 + GroupIdx2,
-        Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
-        Three: GroupIdx4<Group = Two::Group> + GroupIdx3 + GroupIdx2,
-    {
-        self.check_idx(i)
-    }
-}
-
-impl Vec4 {
-    fn check_idx<T>(&self, _: &T) {}
-
-    fn check_group_and_idx<One, Two, Three, Four>(&self, i: &VecIdx4<One, Two, Three, Four>)
-    where
-        One: GroupIdx4 + GroupIdx3 + GroupIdx2,
-        Two: GroupIdx4<Group = One::Group> + GroupIdx3 + GroupIdx2,
-        Three: GroupIdx4<Group = Two::Group> + GroupIdx3 + GroupIdx2,
-        Four: GroupIdx4<Group = Three::Group> + GroupIdx3 + GroupIdx2,
-    {
-        self.check_idx(i)
-    }
-}
 
 // mat
 macro_rules! mat_gen {
