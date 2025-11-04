@@ -35,6 +35,10 @@ macro_rules! vec_gen {
             pub fn into_iter(self) -> std::array::IntoIter<f32, $size> {
                 self.0.into_iter()
             }
+
+            pub fn normalize(&self) -> Self {
+                *self / self.0.iter().map(|x| x.powi(2)).sum::<f32>().sqrt()
+            }
         }
 
         // common traits
@@ -108,6 +112,18 @@ vec_gen!(Vec2 => 2, f32);
 vec_gen!(Vec3 => 3, f32);
 vec_gen!(Vec4 => 4, f32);
 
+// an ability only a Vec3 has: a cross product
+impl Vec3 {
+    pub fn cross(&self, rhs: Vec3) -> Vec3 {
+        Vec3::from([
+            self[Y] * rhs[Z] - self[Z] * rhs[Y],
+            self[Z] * rhs[X] - self[X] * rhs[Z],
+            self[X] * rhs[Y] - self[Y] * rhs[X],
+        ])
+    }
+}
+
+// TODO: Swizzling and Splatting need a bit of help...
 // access structs
 // basically: typestate spam via macros to index into vecs/mats with coords
 // How it would work is you have 3 seperate coords systems: XYZW, RGBA, and STPQ
@@ -176,6 +192,16 @@ where
     pub fn new(lhs: One, rhs: Two) -> Self {
         VecIdx2(lhs, rhs)
     }
+
+    // each of these has an associated vec size that can be filled
+    fn assoc_vec(&self) -> Vec2 {
+        Vec2::default()
+    }
+
+    // deconstruct it to indexes
+    pub fn decompose(self) -> [usize; 2] {
+        [self.0.idx(), self.1.idx()]
+    }
 }
 
 // following two checks are for if the digits are of a certain, lower size
@@ -208,6 +234,14 @@ where
 {
     pub fn new(lhs: VecIdx2<One, Two>, rhs: Three) -> Self {
         VecIdx3(lhs.0, lhs.1, rhs)
+    }
+
+    fn assoc_vec(&self) -> Vec3 {
+        Vec3::default()
+    }
+
+    pub fn decompose(self) -> [usize; 3] {
+        [self.0.idx(), self.1.idx(), self.2.idx()]
     }
 }
 
@@ -244,6 +278,14 @@ where
 {
     pub fn new(lhs: VecIdx3<One, Two, Three>, rhs: Four) -> Self {
         VecIdx4(lhs.0, lhs.1, lhs.2, rhs)
+    }
+
+    fn assoc_vec(&self) -> Vec4 {
+        Vec4::default()
+    }
+
+    pub fn decompose(self) -> [usize; 4] {
+        [self.0.idx(), self.1.idx(), self.2.idx(), self.3.idx()]
     }
 }
 
@@ -381,7 +423,7 @@ macro_rules! index_gen {
 }
 
 // ZST to init macro repeats to bitor all structs together
-struct NullZST;
+pub struct NullZST;
 
 macro_rules! index_bitor {
     ($sing:ident) => {

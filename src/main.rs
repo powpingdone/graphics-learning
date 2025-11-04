@@ -16,6 +16,7 @@ fn bay_tri_area(a: &Vec3, b: &Vec3, c: &Vec3) -> f32 {
 }
 
 fn project_perspective(vec: Vec3) -> Vec3 {
+    // Camera position?
     const CAMERA: f32 = 5.;
     vec / (1. - (vec[Z] / CAMERA))
 }
@@ -87,6 +88,28 @@ fn filled_triangle(
             *depth_px = depth;
             *px = Rgb(tri_color);
         });
+}
+
+fn viewport_mat(width: f32, height: f32, x: f32, y: f32) -> Mat4 {
+    let mut i = Mat4::identity();
+    i[0][X] = width / 2.;
+    i[0][W] = x + width / 2.;
+    i[1][Y] = height / 2.;
+    i[1][W] = y + height / 2.;
+    i
+}
+
+fn perpsective_mat(focal_length: f32) -> Mat4 {
+    let mut i = Mat4::identity();
+    i[3][Z] = -1. / focal_length;
+    i
+}
+
+fn modelview_mat(eye: Vec3, center: Vec3, up: Vec3) -> Mat4 {
+    let n = (eye - center).normalize();
+    let l = up.cross(n).normalize();
+    let m = n.cross(l).normalize();
+    todo!()
 }
 
 // https://haqr.eu/tinyrenderer
