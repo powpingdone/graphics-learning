@@ -65,14 +65,6 @@ macro_rules! vec_gen {
         vec_broadcast_op!($name ($type) => Mul (mul), *);
         vec_broadcast_op!($name ($type) => Div (div), /);
         vec_broadcast_op!($name ($type) => Rem (rem), %);
-
-
-        // int specific broadcast ops
-        //vec_broadcast_op!($name => Shl (shl), <<, $type);
-        //vec_broadcast_op!($name => Shr (shr), >>, $type);
-        //vec_broadcast_op!($name => BitAnd (bitand), &, $type);
-        //vec_broadcast_op!($name => BitOr (bitor), |, $type);
-        //vec_broadcast_op!($name => BitXor (bitxor), ^, $type);
     };
 }
 
@@ -116,7 +108,7 @@ vec_gen!(Vec2 => 2, f32);
 vec_gen!(Vec3 => 3, f32);
 vec_gen!(Vec4 => 4, f32);
 
-// access enums
+// access structs
 // basically: typestate spam via macros to index into vecs/mats with coords
 // How it would work is you have 3 seperate coords systems: XYZW, RGBA, and STPQ
 // where the first letter corresponds to [0], second corresponds to [1], and so on.
@@ -131,7 +123,7 @@ vec_gen!(Vec4 => 4, f32);
 
 // Marker trait for "can Index up to four fields" (X, Y, Z, W)
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` is not a indexable struct, or does the group does not match"
+    message = "`{Self}` is not a indexable struct, or the group does not match"
 )]
 pub trait GroupIdx4 {
     type Group;
@@ -153,7 +145,7 @@ pub trait GroupIdx2: GroupIdx3 {}
 // Marker trait for "This type has only indexes that can do the first three elements"
 #[diagnostic::on_unimplemented(
     message = "`{Self}` does not have indexing elements less than three",
-    note = "in a four component group (ABCD), the first two elements (ABC) are valid for this"
+    note = "in a four component group (ABCD), the first three elements (ABC) are valid for this"
 )]
 pub trait ContainsOnlyIdx3 {}
 
@@ -311,7 +303,7 @@ macro_rules! swiz_panic {
             fn index(&self, _: $idx<One, $($gen),*>) -> &() {
                 const {
                     panic!(
-                        "you cannot swizzle a Vec directly, use the `swz!` and `swz_assign!` macro instead"
+                        "you cannot swizzle/splat a Vec using indexing, use `swiz()` or `splat()`"
                     );
                 }
                 // This is intentional, as the previous line will always panic if this function is called.
@@ -548,47 +540,6 @@ impl Vec4 {
     {
         self.check_idx(i)
     }
-}
-
-// Why swizzling alone needs a macro
-// TL;DR: Index returns a ref, and I don't know of a way
-// to sucessfully return that ref. So, some private functions are
-// created and then typechecked together.
-
-#[macro_export]
-macro_rules! swz {
-    ($lhs:ident[$($flag:ident)|*]) => {
-        // construct idx type normally
-        let decompose_group = NullZST $(| $flag)*;
-        // make associated vec size
-        let mut newvec = decompose_group.assoc_vec();
-        // then do check if vec cannot be indexed higher (eg: only XY on a Vec2)
-        $lhs.check_idx(&decompose_group);
-        // finally, construct newvec
-        for (e, i) in decompose_group.decompose().into_iter().enumerate() {
-            newvec[e] = $lhs[i];
-        }
-        newvec
-    };
-}
-
-// Why does assign need a macro?
-// Because Rust doesn't allow assign to be overridden.
-#[macro_export]
-macro_rules! swz_assign {
-    (*$lhs:ident[$($flag:ident)|*] = $rhs:expr) => {
-        // construct idx type normally
-        let decompose_group = NullZST $(| $flag)*;
-        // make associated vec size
-        let mut newvec = decompose_group.assoc_vec();
-        // then do typecheck if vec cannot be indexed higher (eg: only XY on a Vec2)
-        // and that it also is of a specific type
-        newvec.check_group_and_idx(&decompose_group);
-        // finally, assign each item
-        for (e, x) in decompose_group.decompose().into_iter().zip($rhs) {
-            $lhs[e] = $rhs;
-        }
-    };
 }
 
 // mat
