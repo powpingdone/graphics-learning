@@ -23,6 +23,10 @@ macro_rules! vec_gen {
                     .fold(Default::default(), |acc, x| acc + *x.0 * *x.1)
             }
 
+            pub fn norm(&self) -> $type {
+                self.dot(*self).sqrt()
+            }
+
             // iterator conversions
             pub fn iter(&'_ self) -> std::slice::Iter<'_, f32> {
                 self.0.iter()
