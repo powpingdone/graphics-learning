@@ -729,8 +729,8 @@ macro_rules! square_mat {
 
             pub fn invert_t(self) -> Self {
                 let mut adjugate_t = Self::default();
-                for i in 0..(Self::I - 1) {
-                    for j in 0..(Self::I - 1) {
+                for i in 0..Self::I {
+                    for j in 0..Self::I {
                         adjugate_t[i][j] = self.cofactor(i, j);
                     }
                 }

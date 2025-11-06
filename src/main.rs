@@ -123,10 +123,10 @@ fn main() {
     let perspective = perpsective_mat((eye - center).norm());
     let modelview = modelview_mat(eye, center, up);
     let viewport = viewport_mat(
-        width as f32 / 16.,
-        height as f32 / 16.,
         width as f32 * 7. / 8.,
         height as f32 * 7. / 8.,
+        width as f32 / 16.,
+        height as f32 / 16.,
     );
 
     // extract out required parts
