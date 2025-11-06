@@ -25,7 +25,7 @@ fn filled_triangle(
         Vec2::from([idp2[X], idp2[Y]]),
     ];
 
-    // if area is too small
+    // if area is too small bail (clipping)
     let abc = Mat3::from([
         [screen0[X], screen0[Y], 1.],
         [screen1[X], screen1[Y], 1.],
@@ -36,18 +36,18 @@ fn filled_triangle(
     }
 
     // make max bounding box
-    let min_x = screen0[X].min(screen1[X]).min(screen2[X]).max(0.).round() as u32;
-    let min_y = screen0[Y].min(screen1[Y]).min(screen2[Y]).max(0.).round() as u32;
+    let min_x = screen0[X].min(screen1[X]).min(screen2[X]).max(0.).floor() as u32;
+    let min_y = screen0[Y].min(screen1[Y]).min(screen2[Y]).max(0.).floor() as u32;
     let max_x = screen0[X]
         .max(screen1[X])
         .max(screen2[X])
         .min(img.width() as f32 - 1.)
-        .round() as u32;
+        .ceil() as u32;
     let max_y = screen0[Y]
         .max(screen1[Y])
         .max(screen2[Y])
         .min(img.height() as f32 - 1.)
-        .round() as u32;
+        .ceil() as u32;
 
     let tri_color = rand::random();
 
@@ -66,7 +66,7 @@ fn filled_triangle(
                 return;
             }
 
-            // depth buffer check
+            // highest pixel, according to the depth buffer
             let depth = bc.dot(Vec3::from([ndc0[Z], ndc1[Z], ndc2[Z]]));
             if depth <= *depth_px {
                 return;
@@ -119,7 +119,8 @@ fn main() {
     let height = height - 1;
     let eye = Vec3::from([-1., 0., 2.]);
     let center = Vec3::from([0., 0., 0.]);
-    let up = Vec3::from([0., 1., 0.]);
+    // this is inverted due to how coords are upside down in image
+    let up = Vec3::from([0., -1., 0.]);
     let perspective = perpsective_mat((eye - center).norm());
     let modelview = modelview_mat(eye, center, up);
     let viewport = viewport_mat(

@@ -780,9 +780,9 @@ macro_rules! cofactor_mat {
             pub fn cofactor(self, x: usize, y: usize) -> $typ {
                 // Since this only leads to a scalar, manually extract it from the mat.
                 // Note that cofactors *only* have everything except the selected rows, so
-                // invert I over the selection and you have the scalar.
-                self[(Self::I - 1) - x][(Self::I - 1) - y]
-                    * (if (x + y) % 2 == 1 { -1. } else { 1. })
+                // invert I - 1 (=> 1) over the selection and you have the scalar. Just in
+                // case something weird happens though, mod 2 to prevent overflowing.
+                self[(1 - x) % 2][(1 - y) % 2] * (if (x + y) % 2 == 1 { -1. } else { 1. })
             }
         }
     };
