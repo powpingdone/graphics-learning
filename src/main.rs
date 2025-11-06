@@ -18,19 +18,14 @@ fn filled_triangle(
     viewport: Mat4,
 ) {
     let [ndc0, ndc1, ndc2] = [clip0 / clip0[W], clip1 / clip1[W], clip2 / clip2[W]];
-    let [idp0, idp1, idp2] = [viewport * ndc0, viewport * ndc1, viewport * ndc2];
     let [screen0, screen1, screen2] = [
-        Vec2::from([idp0[X], idp0[Y]]),
-        Vec2::from([idp1[X], idp1[Y]]),
-        Vec2::from([idp2[X], idp2[Y]]),
+        (viewport * ndc0).swiz(X | Y),
+        (viewport * ndc1).swiz(X | Y),
+        (viewport * ndc2).swiz(X | Y),
     ];
 
     // if area is too small bail (clipping)
-    let abc = Mat3::from([
-        [screen0[X], screen0[Y], 1.],
-        [screen1[X], screen1[Y], 1.],
-        [screen2[X], screen2[Y], 1.],
-    ]);
+    let abc = Mat3::from([screen0.extend(1.), screen1.extend(1.), screen2.extend(1.)]);
     if abc.det() < 1.0 {
         return;
     }
@@ -98,10 +93,10 @@ fn modelview_mat(eye: Vec3, center: Vec3, up: Vec3) -> Mat4 {
     let l = up.cross(n).normalize();
     let m = n.cross(l).normalize();
     Mat4::from([
-        [l[X], l[Y], l[Z], 0.],
-        [m[X], m[Y], m[Z], 0.],
-        [n[X], n[Y], n[Z], 0.],
-        [0., 0., 0., 1.],
+        l.extend(0.),
+        m.extend(0.),
+        n.extend(0.),
+        Vec4::from([0., 0., 0., 1.]),
     ]) * Mat4::from([
         [1., 0., 0., -center[X]],
         [0., 1., 0., -center[Y]],
@@ -114,7 +109,7 @@ fn modelview_mat(eye: Vec3, center: Vec3, up: Vec3) -> Mat4 {
 fn main() {
     let mut img = image::RgbImage::new(1024, 1024);
     let (width, height) = img.dimensions();
-    let mut zbuf = vec![0f32; height as usize * width as usize];
+    let mut zbuf = vec![-f32::INFINITY; height as usize * width as usize];
     let width = width - 1;
     let height = height - 1;
     let eye = Vec3::from([-1., 0., 2.]);
@@ -157,17 +152,23 @@ fn main() {
     img.save("arf.tga").unwrap();
 
     // show zbuf
-    let zmin = zbuf
-        .iter()
-        .fold(f32::INFINITY, |x, acc| if x < *acc { x } else { *acc });
+    let zmin = zbuf.iter().fold(f32::INFINITY, |acc, x| {
+        if x.is_finite() && *x < acc { *x } else { acc }
+    });
     let zmax = zbuf
         .iter()
-        .fold(-f32::INFINITY, |x, acc| if x > *acc { x } else { *acc });
+        .fold(-f32::INFINITY, |acc, x| if *x > acc { *x } else { acc });
     image::GrayImage::from_vec(
         width + 1,
         height + 1,
         zbuf.into_iter()
-            .map(|x| 255 - (((zmax - x) / (zmax - zmin)) * 255.0) as u8)
+            .map(|x| {
+                if x.is_infinite() {
+                    0
+                } else {
+                    255 - (((zmax - x) / (zmax - zmin)) * 255.0) as u8
+                }
+            })
             .collect(),
     )
     .unwrap()

@@ -127,8 +127,40 @@ impl Vec3 {
     }
 }
 
-// TODO: Swizzling and Splatting need a bit of help...
-// access structs
+macro_rules! vec_gen_extend_shrink {
+    ($low:ident => $high:ident: $ty:ident) => {
+        impl $low {
+            // Extend vec with a new item, changing to a larger vec
+            pub fn extend(self, new: $ty) -> $high {
+                let mut newarr = [$ty::default(); $high::LEN];
+                for i in 0..Self::LEN {
+                    newarr[i] = self[i];
+                }
+                newarr[Self::LEN] = new;
+                $high::from(newarr)
+            }
+        }
+
+        impl $high {
+            // shrink vec to a lower size, changing to a smaller vec
+            pub fn shrink(self) -> $low {
+                let mut newarr = [$ty::default(); $low::LEN];
+                for i in 0..$low::LEN {
+                    newarr[i] = self[i];
+                }
+                $low::from(newarr)
+            }
+        }
+    };
+}
+
+vec_gen_extend_shrink!(Vec2 => Vec3: f32);
+vec_gen_extend_shrink!(Vec3 => Vec4: f32);
+
+// This next entire thing is dedicated to swizzling, with lots of very nice type checking.
+// Be warned. This will take up your time and swallow you.
+//
+// Access structs
 // basically: typestate spam via macros to index into vecs/mats with coords
 // How it would work is you have 3 seperate coords systems: XYZW, RGBA, and STPQ
 // where the first letter corresponds to [0], second corresponds to [1], and so on.
@@ -179,6 +211,19 @@ pub trait ContainsOnlyIdx2 {}
 // There is not a ContainsOnlyIdx4, as all structs that would contain idx elements
 // will contain GroupIdx4 only
 
+// Trait for constructing copied vecs for swizzling with VecIdxs
+pub trait AssocVecType {
+    type AssocVec: Default + IndexMut<usize>;
+
+    // each of these has an associated vec size that can be filled
+    fn assoc_vec(&self) -> Self::AssocVec {
+        Self::AssocVec::default()
+    }
+
+    // deconstruct it to indexes for filling the new vec
+    fn deconstruct(self) -> Box<[usize]>;
+}
+
 // Structs to model Indexing
 pub struct VecIdx2<One, Two>(One, Two)
 where
@@ -192,19 +237,22 @@ where
     One: GroupIdx4,
     Two: GroupIdx4<Group = One::Group>,
 {
-    // create a new fn
+    // create a new idx
     pub fn new(lhs: One, rhs: Two) -> Self {
         VecIdx2(lhs, rhs)
     }
+}
 
-    // each of these has an associated vec size that can be filled
-    fn assoc_vec(&self) -> Vec2 {
-        Vec2::default()
-    }
+// then impl the stuff for splatting deconstruction
+impl<One, Two> AssocVecType for VecIdx2<One, Two>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+{
+    type AssocVec = Vec2;
 
-    // deconstruct it to indexes
-    pub fn decompose(self) -> [usize; 2] {
-        [self.0.idx(), self.1.idx()]
+    fn deconstruct(self) -> Box<[usize]> {
+        Box::new([self.0.idx(), self.1.idx()])
     }
 }
 
@@ -239,13 +287,18 @@ where
     pub fn new(lhs: VecIdx2<One, Two>, rhs: Three) -> Self {
         VecIdx3(lhs.0, lhs.1, rhs)
     }
+}
 
-    fn assoc_vec(&self) -> Vec3 {
-        Vec3::default()
-    }
+impl<One, Two, Three> AssocVecType for VecIdx3<One, Two, Three>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>,
+{
+    type AssocVec = Vec3;
 
-    pub fn decompose(self) -> [usize; 3] {
-        [self.0.idx(), self.1.idx(), self.2.idx()]
+    fn deconstruct(self) -> Box<[usize]> {
+        Box::new([self.0.idx(), self.1.idx(), self.2.idx()])
     }
 }
 
@@ -283,13 +336,19 @@ where
     pub fn new(lhs: VecIdx3<One, Two, Three>, rhs: Four) -> Self {
         VecIdx4(lhs.0, lhs.1, lhs.2, rhs)
     }
+}
 
-    fn assoc_vec(&self) -> Vec4 {
-        Vec4::default()
-    }
+impl<One, Two, Three, Four> AssocVecType for VecIdx4<One, Two, Three, Four>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>,
+    Four: GroupIdx4<Group = Three::Group>,
+{
+    type AssocVec = Vec4;
 
-    pub fn decompose(self) -> [usize; 4] {
-        [self.0.idx(), self.1.idx(), self.2.idx(), self.3.idx()]
+    fn deconstruct(self) -> Box<[usize]> {
+        Box::new([self.0.idx(), self.1.idx(), self.2.idx(), self.3.idx()])
     }
 }
 
@@ -344,18 +403,18 @@ index_singlet!(Vec4(GroupIdx4));
 
 // otherwise, error out
 macro_rules! swiz_panic {
-    ($idx:ident (One, $($gen:ident),*): $typ:ident) => {
+    ($idx:ident (One, $($gen:ident),*): $typ:ident, $subtyp:ident) => {
         impl<One, $($gen),*> Index<$idx<One, $($gen),*>> for $typ
         where
             One: GroupIdx4,
             $($gen: GroupIdx4<Group = One::Group>),*
         {
-            type Output = ();
+            type Output = $subtyp;
 
-            fn index(&self, _: $idx<One, $($gen),*>) -> &() {
+            fn index(&self, _: $idx<One, $($gen),*>) -> &$subtyp {
                 const {
                     panic!(
-                        "you cannot swizzle/splat a Vec using indexing, use `swiz()` or `splat()`"
+                        "you cannot swizzle/splat a Vec using indexing, use `swiz()`"
                     )
                 }
             }
@@ -363,15 +422,39 @@ macro_rules! swiz_panic {
     };
 }
 
-swiz_panic!(VecIdx2 (One, Two): Vec2);
-swiz_panic!(VecIdx2 (One, Two): Vec3);
-swiz_panic!(VecIdx2 (One, Two): Vec4);
-swiz_panic!(VecIdx3 (One, Two, Three): Vec2);
-swiz_panic!(VecIdx3 (One, Two, Three): Vec3);
-swiz_panic!(VecIdx3 (One, Two, Three): Vec4);
-swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec2);
-swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec3);
-swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec4);
+swiz_panic!(VecIdx2 (One, Two): Vec2, f32);
+swiz_panic!(VecIdx2 (One, Two): Vec3, f32);
+swiz_panic!(VecIdx2 (One, Two): Vec4, f32);
+swiz_panic!(VecIdx3 (One, Two, Three): Vec2, f32);
+swiz_panic!(VecIdx3 (One, Two, Three): Vec3, f32);
+swiz_panic!(VecIdx3 (One, Two, Three): Vec4, f32);
+swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec2, f32);
+swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec3, f32);
+swiz_panic!(VecIdx4 (One, Two, Three, Four): Vec4, f32);
+
+// for more complex indexing, using a dedicated function is required
+macro_rules! swiz_fn_gen {
+    ($vec:ident ($ty:ty) $(== $limit:ident)? ) => {
+        impl $vec {
+            #[inline]
+            pub fn swiz<T>(&self, idx: T) -> T::AssocVec
+            where
+                T: AssocVecType $(+ $limit)?,
+                <T as AssocVecType>::AssocVec: Index<usize, Output = $ty>
+            {
+                let mut ret = idx.assoc_vec();
+                for (e, x) in idx.deconstruct().into_iter().enumerate() {
+                    ret[e] = self[x];
+                }
+                ret
+            }
+        }
+    };
+}
+
+swiz_fn_gen!(Vec2(f32) == ContainsOnlyIdx2);
+swiz_fn_gen!(Vec3(f32) == ContainsOnlyIdx3);
+swiz_fn_gen!(Vec4(f32));
 
 // index struct generation
 macro_rules! index_gen {
@@ -479,6 +562,34 @@ macro_rules! index_bitor {
 index_gen!((XYZW): X, Y, Z, W);
 index_gen!((RGBA): R, G, B, A);
 index_gen!((STPQ): S, T, P, Q);
+
+// finally, the bitors for the idxes
+impl<One, Two, Three> BitOr<Three> for VecIdx2<One, Two>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>,
+{
+    type Output = VecIdx3<One, Two, Three>;
+
+    fn bitor(self, rhs: Three) -> Self::Output {
+        VecIdx3::new(self, rhs)
+    }
+}
+
+impl<One, Two, Three, Four> BitOr<Four> for VecIdx3<One, Two, Three>
+where
+    One: GroupIdx4,
+    Two: GroupIdx4<Group = One::Group>,
+    Three: GroupIdx4<Group = Two::Group>,
+    Four: GroupIdx4<Group = Three::Group>,
+{
+    type Output = VecIdx4<One, Two, Three, Four>;
+
+    fn bitor(self, rhs: Four) -> Self::Output {
+        VecIdx4::new(self, rhs)
+    }
+}
 
 // mat
 macro_rules! mat_gen {
