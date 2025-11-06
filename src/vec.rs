@@ -41,7 +41,7 @@ macro_rules! vec_gen {
             }
 
             pub fn normalize(&self) -> Self {
-                *self / self.0.iter().map(|x| x.powi(2)).sum::<f32>().sqrt()
+                *self / self.norm()
             }
         }
 
@@ -670,7 +670,7 @@ macro_rules! mat_mul {
                 for x in 0..$out::COLS {
                     for y in 0..$out::ROWS {
                         for i in 0..$lhs::COLS {
-                            ret[x][y] = self[i][x] * rhs[y][i];
+                            ret[x][y] += self[x][i] * rhs[i][y];
                         }
                     }
                 }
@@ -744,7 +744,7 @@ macro_rules! square_mat {
             // This is technically incorrect as a det would account for when I is 1 (Mat1 aka scalar)
             // but due to Mat2 being just above Mat1, that special case is handled there instead
             pub fn det(self) -> $typ {
-                (0..Self::I).fold(0.0f32, |acc, i| acc + self[i][0] * self.cofactor(i, 0))
+                (0..Self::I).fold(0.0f32, |acc, i| acc + self[0][i] * self.cofactor(0, i))
             }
         }
     };
@@ -781,7 +781,8 @@ macro_rules! cofactor_mat {
                 // Since this only leads to a scalar, manually extract it from the mat.
                 // Note that cofactors *only* have everything except the selected rows, so
                 // invert I over the selection and you have the scalar.
-                self[Self::I - x][Self::I - y] * (if (x + y) % 2 == 1 { -1. } else { 1. })
+                self[(Self::I - 1) - x][(Self::I - 1) - y]
+                    * (if (x + y) % 2 == 1 { -1. } else { 1. })
             }
         }
     };

@@ -9,36 +9,6 @@ use rayon::iter::ParallelIterator;
 mod vec;
 use crate::vec::*;
 
-fn bay_tri_area(a: &Vec3, b: &Vec3, c: &Vec3) -> f32 {
-    0.5 * ((b[Y] - a[Y]) * (b[X] + a[X])
-        + (c[Y] - b[Y]) * (c[X] + b[X])
-        + (a[Y] - c[Y]) * (a[X] + c[X]))
-}
-
-fn project_perspective(vec: Vec3) -> Vec3 {
-    // Camera position?
-    const CAMERA: f32 = 5.;
-    vec / (1. - (vec[Z] / CAMERA))
-}
-
-fn rot3(vec: Vec3, rot: Vec3) -> Vec3 {
-    let (alpha, beta, gamma) = (rot[Z], rot[Y], rot[X]);
-    let (acos, bcos, gcos) = (alpha.cos(), beta.cos(), gamma.cos());
-    let (asin, bsin, gsin) = (alpha.sin(), beta.sin(), gamma.sin());
-    let mut rot = Mat3::default();
-    // from https://en.wikipedia.org/wiki/Rotation_matrix#General_3D_rotations
-    rot[0][0] = acos * bcos;
-    rot[1][0] = acos * bsin * gsin - asin * gcos;
-    rot[2][0] = acos * bsin * gcos + asin * gsin;
-    rot[0][1] = asin * bcos;
-    rot[1][1] = asin * bsin * gsin + acos * gcos;
-    rot[2][1] = asin * bsin * gcos - acos * gsin;
-    rot[0][2] = -bsin;
-    rot[1][2] = bcos * gsin;
-    rot[2][2] = bcos * gcos;
-    rot * vec
-}
-
 fn filled_triangle(
     img: &mut image::RgbImage,
     zbuf: &mut Vec<f32>,
