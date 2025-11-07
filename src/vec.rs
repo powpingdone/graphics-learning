@@ -43,6 +43,17 @@ macro_rules! vec_gen {
             pub fn normalize(&self) -> Self {
                 *self / self.norm()
             }
+
+            pub fn apply<T>(self, f: T) -> Self
+            where
+                T: Fn($type) -> $type
+            {
+                let mut new = Self::default();
+                for (e,x) in self.into_iter().map(f).enumerate() {
+                    new[e] = x;
+                }
+                new
+            }
         }
 
         // common traits
@@ -609,15 +620,41 @@ macro_rules! mat_gen {
             pub const fn rows(&self) -> usize {
                 Self::ROWS
             }
+
+            pub fn iter(&self) -> std::slice::Iter<'_, $vec_row> {
+                self.0.iter()
+            }
+
+            pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, $vec_row> {
+                self.0.iter_mut()
+            }
+
+            pub fn into_iter(self) -> std::array::IntoIter<$vec_row, $col_len>{
+                self.0.into_iter()
+            }
+
+            pub fn apply<T, R>(self, f: T) -> [R; Self::COLS]
+            where
+                T: Fn($vec_row) -> R,
+                R: Default + Copy,
+            {
+                let mut x = [R::default(); Self::COLS] ;
+                for (e, i) in self.into_iter().enumerate() {
+                    x[e] = f(i);
+                }
+                x
+            }
         }
 
         // common traits
+        // array of vecs
         impl From<[$vec_row; $col_len]> for $name {
             fn from(i: [$vec_row; $col_len]) -> Self {
                 Self(i)
             }
         }
 
+        // 2d array containing the type
         impl From<[[$type; $vec_row::LEN]; $col_len]> for $name {
             fn from(i: [[$type; $vec_row::LEN]; $col_len]) -> Self {
                 let mut new: [$vec_row; $col_len] = Default::default();
