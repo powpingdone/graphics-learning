@@ -100,6 +100,7 @@ macro_rules! vec_broadcast_indivdual_impl {
         impl $trait_name<$type> for $name {
             type Output = $name;
 
+            #[allow(clippy::assign_op_pattern)]
             fn $trait_fn(mut self, rhs: $type) -> $name {
                 for x in 0..Self::LEN {
                     self[x] = self[x] $op_by rhs;
@@ -113,6 +114,7 @@ macro_rules! vec_broadcast_indivdual_impl {
         impl $trait_name<$name> for $name {
             type Output = $name;
 
+            #[allow(clippy::assign_op_pattern)]
             fn $trait_fn(mut self, rhs: $name) -> $name {
                 for x in 0..Self::LEN {
                     self[x] = self[x] $op_by rhs[x];
@@ -520,9 +522,6 @@ macro_rules! index_gen {
     };
 }
 
-// ZST to init macro repeats to bitor all structs together
-pub struct NullZST;
-
 macro_rules! index_bitor {
     ($sing:ident) => {
         // Self struct
@@ -533,18 +532,10 @@ macro_rules! index_bitor {
                 VecIdx2::new(self, rhs)
             }
         }
-
-        impl BitOr<$sing> for NullZST {
-            type Output = $sing;
-
-            fn bitor(self, rhs: $sing) -> $sing {
-                rhs
-            }
-        }
     };
 
     ($lhs:ident $($rhs:ident)*) => {
-        // bitor self and NullZST
+        // bitor self
         index_bitor!($lhs);
         // recurse: bitor the next items
         index_bitor!($($rhs)*);
@@ -570,9 +561,9 @@ macro_rules! index_bitor {
     };
 }
 
-index_gen!((XYZW): X, Y, Z, W);
-index_gen!((RGBA): R, G, B, A);
-index_gen!((STPQ): S, T, P, Q);
+index_gen!((_XYZW): X, Y, Z, W);
+index_gen!((_RGBA): R, G, B, A);
+index_gen!((_STPQ): S, T, P, Q);
 
 // finally, the bitors for the idxes
 impl<One, Two, Three> BitOr<Three> for VecIdx2<One, Two>
@@ -730,6 +721,7 @@ macro_rules! mat_broadcast_scalar {
         impl $trait_name<$type> for $name {
             type Output = $name;
 
+            #[allow(clippy::assign_op_pattern)]
             fn $trait_fn(mut self, rhs: $type) -> $name {
                 for x in 0..Self::COLS {
                     for y in 0..Self::ROWS {
@@ -747,6 +739,7 @@ macro_rules! mat_broadcast_mat {
         impl $trait_name<$name> for $name {
             type Output = $name;
 
+            #[allow(clippy::assign_op_pattern)]
             fn $trait_fn(mut self, rhs: $name) -> $name {
                 for x in 0..Self::COLS {
                     for y in 0..Self::ROWS {
@@ -809,6 +802,7 @@ macro_rules! mat_mul {
         impl Mul<$rhs> for $lhs {
             type Output = $out;
 
+            #[allow(clippy::assign_op_pattern)]
             fn mul(self, rhs: $rhs) -> $out {
                 const _ROW_COL_CHECK: () = assert!($lhs::COLS == $rhs::ROWS);
                 const _COLS_MATCH: () = assert!($lhs::ROWS == $out::ROWS);
