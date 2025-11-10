@@ -257,15 +257,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generic-array"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8c8444bc9d71b935156cc0ccab7f622180808af7867b1daae6547d773591703"
-dependencies = [
- "typenum",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -302,12 +293,10 @@ dependencies = [
 name = "gpu-funs"
 version = "0.1.0"
 dependencies = [
- "generic-array",
  "image",
  "obj",
  "rand 0.9.2",
  "rayon",
- "typenum",
 ]
 
 [[package]]
@@ -953,12 +942,6 @@ dependencies = [
  "toml_datetime",
  "winnow",
 ]
-
-[[package]]
-name = "typenum"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 
 [[package]]
 name = "unicode-ident"

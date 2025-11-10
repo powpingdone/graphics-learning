@@ -1,5 +1,6 @@
 #![recursion_limit = "128"]
 use obj::Obj;
+use rand::Rng;
 
 #[allow(dead_code)]
 mod vec;
@@ -7,42 +8,99 @@ use crate::vec::*;
 mod gl_func;
 use crate::gl_func::*;
 
+struct RandomFragShaderWithModel {
+    perspective: Mat4,
+    modelview: Mat4,
+    color: image::Rgb<u8>,
+    tri: Mat3x4,
+}
+
+impl RandomFragShaderWithModel {
+    fn new(eye: Vec3, center: Vec3, up: Vec3) -> Self {
+        Self {
+            perspective: perpsective_mat((eye - center).norm()),
+            modelview: modelview_mat(eye, center, up),
+            tri: Mat3x4::default(),
+            color: image::Rgb([0, 0, 0]),
+        }
+    }
+
+    fn set_tri_from_coords(&mut self, pt0: Vec3, pt1: Vec3, pt2: Vec3) {
+        self.tri = Mat3x4::from([
+            self.perspective * self.modelview * pt0.extend(1.),
+            self.perspective * self.modelview * pt1.extend(1.),
+            self.perspective * self.modelview * pt2.extend(1.),
+        ]);
+    }
+
+    fn copy_tri(&self) -> Mat3x4 {
+        self.tri
+    }
+
+    fn set_color(&mut self, rgb: image::Rgb<u8>) {
+        self.color = rgb;
+    }
+}
+
+impl FragShader for RandomFragShaderWithModel {
+    fn fragment(&self, _: Vec3) -> Option<image::Rgb<u8>> {
+        Some(self.color)
+    }
+}
+
 // https://haqr.eu/tinyrenderer
 fn main() {
+    let mut rand = rand::rng();
     let mut ctx = OwnedDrawingContext::new(1024, 1024);
     let eye = Vec3::from([-1., 0., 2.]);
     let center = Vec3::from([0., 0., 0.]);
     // this is inverted due to how coords are upside down in image
     let up = Vec3::from([0., -1., 0.]);
-    let perspective = perpsective_mat((eye - center).norm());
-    let modelview = modelview_mat(eye, center, up);
+    let mut fragshader = RandomFragShaderWithModel::new(eye, center, up);
 
-    // extract out required parts
-    let obj = Obj::load("african_head.obj").unwrap().data;
-    let faces = &obj.objects[0].groups[0].polys;
-    let verts = &obj.position;
+    // extract out arglist
+    let mut args = std::env::args_os();
+    drop(args.next()); // skip executable name
+    let args = args.collect::<Vec<_>>();
+    if args.len() == 0 {
+        println!("no args were provided, please provide paths to each .obj file");
+        return;
+    }
 
-    // per polygon
-    for face in faces.iter() {
-        // decode face positions
-        let pts = [face.0[0].0, face.0[1].0, face.0[2].0];
-        let [vert0, vert1, vert2] = [verts[pts[0]], verts[pts[1]], verts[pts[2]]];
-        // pack into structs
-        let pt0 = Vec3::from(vert0).extend(1.);
-        let pt1 = Vec3::from(vert1).extend(1.);
-        let pt2 = Vec3::from(vert2).extend(1.);
-        // make clip(triangle) coords
-        let tri = Mat3x4::from([
-            perspective * modelview * pt0,
-            perspective * modelview * pt1,
-            perspective * modelview * pt2,
-        ]);
+    // per file path
+    for path in args {
+        let obj = Obj::load(path).unwrap().data;
+        let verts = &obj.position;
+        // per object
+        for object in &obj.objects {
+            // per group of faces
+            for group in &object.groups {
+                let faces = &group.polys;
 
-        rasterize(ctx.mutate(), tri);
+                // per polygon
+                for face in faces.iter() {
+                    // decode face positions
+                    let pts = [face.0[0].0, face.0[1].0, face.0[2].0];
+                    let [vert0, vert1, vert2] = [verts[pts[0]], verts[pts[1]], verts[pts[2]]];
+                    // pack into structs
+                    let pt0 = Vec3::from(vert0);
+                    let pt1 = Vec3::from(vert1);
+                    let pt2 = Vec3::from(vert2);
+                    // make clip(triangle) coords
+                    fragshader.set_tri_from_coords(pt0, pt1, pt2);
+                    let tri = fragshader.copy_tri();
+
+                    // set random color
+                    fragshader.set_color(image::Rgb(rand.random()));
+
+                    rasterize(ctx.mutate(), &fragshader, tri);
+                }
+            }
+        }
     }
 
     // show output
-    ctx.copy_frame().save("arf.tga").unwrap();
+    ctx.copy_frame().save("render.tga").unwrap();
 
     // show zbuf
     ctx.render_zbuf().save("zbuf.tga").unwrap();

@@ -5,6 +5,10 @@ use rayon::iter::ParallelIterator;
 
 use crate::vec::*;
 
+pub trait FragShader {
+    fn fragment(&self, bary_coord: Vec3) -> Option<Rgb<u8>>;
+}
+
 // drawing context that is given to the user
 pub struct OwnedDrawingContext {
     frame: image::RgbImage,
@@ -111,7 +115,11 @@ pub fn modelview_mat(eye: Vec3, center: Vec3, up: Vec3) -> Mat4 {
     ])
 }
 
-pub fn rasterize(ctx: MutatingDrawingContext<'_>, tri: Mat3x4) {
+pub fn rasterize(
+    ctx: MutatingDrawingContext<'_>,
+    shader: &(dyn FragShader + Send + Sync),
+    tri: Mat3x4,
+) {
     // normalized device coords
     let ndc: Mat3x4 = tri.apply(|i| i / i[W]).into();
     // screeen coords
@@ -145,17 +153,13 @@ pub fn rasterize(ctx: MutatingDrawingContext<'_>, tri: Mat3x4) {
         .min(ctx.frame.height() as f32 - 1.)
         .ceil() as u32;
 
-    let tri_color = rand::random();
-
-    // run on bounding box
+    // run on frame
     ctx.frame
         .par_enumerate_pixels_mut()
         // with zbuffer
         .zip(ctx.zbuf.par_iter_mut())
-        .filter(|((x, y, _), _)| {
-            // within bounding box
-            *x >= min_x && *x < max_x && *y >= min_y && *y < max_y
-        })
+        // within bounding box
+        .filter(|((x, y, _), _)| *x >= min_x && *x < max_x && *y >= min_y && *y < max_y)
         .for_each(|((x, y, px), depth_px)| {
             // within triangle
             let bc = abc.invert_t() * Vec3::from([x as f32, y as f32, 1.]);
@@ -169,8 +173,11 @@ pub fn rasterize(ctx: MutatingDrawingContext<'_>, tri: Mat3x4) {
                 return;
             }
 
-            // update depth and pixel
-            *depth_px = depth;
-            *px = Rgb(tri_color);
+            // if shader returns a color
+            if let Some(rgb) = shader.fragment(bc) {
+                // update depth and pixel
+                *depth_px = depth;
+                *px = rgb;
+            }
         });
 }
