@@ -1,4 +1,3 @@
-use image::Rgb;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
@@ -6,7 +5,7 @@ use rayon::iter::ParallelIterator;
 use crate::vec::*;
 
 pub trait FragShader {
-    fn fragment(&self, bary_coord: Vec3) -> Option<Rgb<u8>>;
+    fn fragment(&self, frag_coord: Vec3) -> Option<Vec3>;
 }
 
 // drawing context that is given to the user
@@ -175,7 +174,13 @@ pub fn rasterize(
 
             // if shader returns a color
             if let Some(rgb) = shader.fragment(bc) {
-                // update depth and pixel
+                // convert to u8 rgb
+                let rgb = image::Rgb([
+                    rgb[R].clamp(0., 255.) as u8,
+                    rgb[G].clamp(0., 255.) as u8,
+                    rgb[B].clamp(0., 255.) as u8,
+                ]);
+                // then update depth and pixel
                 *depth_px = depth;
                 *px = rgb;
             }
