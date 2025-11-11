@@ -7,19 +7,21 @@ use crate::vec::*;
 mod gl_func;
 use crate::gl_func::*;
 
-struct PhongFragShaderWithModel {
+struct SmoothFragShaderWithModel {
     perspective: Mat4,
     modelview: Mat4,
     tri: Mat3,
     sun: Vec3,
+    tri_normal: Option<Mat3>,
 }
 
-impl PhongFragShaderWithModel {
+impl SmoothFragShaderWithModel {
     fn new(eye: Vec3, center: Vec3, up: Vec3, sun: Vec3) -> Self {
         Self {
             perspective: perpsective_mat((eye - center).norm()),
             modelview: modelview_mat(eye, center, up),
             tri: Mat3::default(),
+            tri_normal: None,
             sun,
         }
     }
@@ -43,19 +45,37 @@ impl PhongFragShaderWithModel {
         // extract out the homogenous triangle struct for the draw call
         self.tri.apply(|row| row.extend(1.)).into()
     }
+
+    fn set_tri_normal(&mut self, inp: Option<Mat3>) {
+        self.tri_normal = inp;
+    }
 }
 
-impl FragShader for PhongFragShaderWithModel {
-    fn fragment(&self, _frag_coord: Vec3) -> Option<Vec3> {
+impl FragShader for SmoothFragShaderWithModel {
+    fn fragment(&self, frag_coord: Vec3) -> Option<Vec3> {
         // base color to be manipulated
         let model_color = Vec3::from([255., 255., 255.]);
         // the percentage of ambient lighting, the base of the model color
         let ambient = 0.4;
-        // get AB and AC vectors
-        let a = self.tri[1] - self.tri[0];
-        let b = self.tri[2] - self.tri[0];
-        // to cross and make the normal vector
-        let surface_norm = a.cross(b).normalize();
+
+        // compute surface normal if we already have them
+        let surface_norm = if let Some(mat) = self.tri_normal {
+            // vary the normals based on how far away the normal
+            // is from the bary coord
+            mat.into_iter()
+                .zip(frag_coord.iter().copied())
+                .map(|(e, i)| e * i)
+                .sum::<Vec3>()
+                .normalize()
+        } else {
+            // and if we dont have the normal, compute the phong
+            // get AB and AC vectors (or P0P1 and P0P2)
+            let a = self.tri[1] - self.tri[0];
+            let b = self.tri[2] - self.tri[0];
+            // cross and make the normal vector for phong
+            a.cross(b).normalize()
+        };
+
         // and then find how far away it is from the sun
         let diffuse = surface_norm.dot(self.sun).max(0.);
         // then, make opposite of the sun vector for reflection
@@ -77,7 +97,7 @@ fn main() {
     // this is inverted due to how coords are upside down in image
     let up = Vec3::from([0., -1., 0.]);
     let sun = Vec3::from([1., 0., 1.]).normalize();
-    let mut fragshader = PhongFragShaderWithModel::new(eye, center, up, sun);
+    let mut fragshader = SmoothFragShaderWithModel::new(eye, center, up, sun);
 
     // extract out arglist
     let mut args = std::env::args_os();
@@ -92,6 +112,8 @@ fn main() {
     for path in args {
         let obj = Obj::load(path).unwrap().data;
         let verts = &obj.position;
+        let norms = &obj.normal;
+
         // per object
         for object in &obj.objects {
             // per group of faces
@@ -110,6 +132,24 @@ fn main() {
                     // make clip(triangle) coords
                     fragshader.set_tri_from_coords(pt0, pt1, pt2);
                     let tri = fragshader.copy_tri_arr();
+                    // decode normals
+                    let npts = [face.0[0].2, face.0[1].2, face.0[2].2];
+                    // if all verts have associated normals
+                    if npts.iter().all(|x| x.is_some()) {
+                        // get associated pts
+                        let npts = npts
+                            .into_iter()
+                            .map(|x| norms[x.unwrap()])
+                            .collect::<Box<[_]>>();
+                        // collect and set
+                        let nverts = Mat3::from([npts[0], npts[1], npts[2]]);
+                        fragshader.set_tri_normal(Some(nverts));
+                    } else {
+                        // if not, unset
+                        fragshader.set_tri_normal(None);
+                    }
+
+                    // raster the tri
                     rasterize(ctx.mutate(), &fragshader, tri);
                 }
             }

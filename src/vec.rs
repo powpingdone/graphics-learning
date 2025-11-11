@@ -16,15 +16,11 @@ macro_rules! vec_gen {
             }
 
             // dot product
-            pub fn dot(&self, rhs: $name) -> $type {
+            pub fn dot(&self, rhs: Self) -> $type {
                 self.0
                     .iter()
                     .zip(rhs.0.iter())
                     .fold(Default::default(), |acc, x| acc + *x.0 * *x.1)
-            }
-
-            pub fn norm(&self) -> $type {
-                self.dot(*self).sqrt()
             }
 
             // iterator conversions
@@ -40,9 +36,15 @@ macro_rules! vec_gen {
                 self.0.into_iter()
             }
 
+            // extra math ops
+            pub fn norm(&self) -> $type {
+                self.dot(*self).sqrt()
+            }
+
             pub fn normalize(&self) -> Self {
                 *self / self.norm()
             }
+
 
             pub fn apply<T>(self, f: T) -> Self
             where
@@ -60,6 +62,12 @@ macro_rules! vec_gen {
         impl From<[$type; $size]> for $name {
             fn from(i: [$type; $size]) -> Self {
                 Self(i)
+            }
+        }
+
+        impl std::iter::Sum for $name {
+            fn sum<T>(iter: T) -> Self where T: Iterator<Item = Self> {
+                iter.fold($name::default(), |acc, x| acc + x)
             }
         }
 
