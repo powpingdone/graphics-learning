@@ -5,19 +5,19 @@ use rayon::iter::ParallelIterator;
 use crate::vec::*;
 
 pub trait FragShader {
-    fn fragment(&self, frag_coord: Vec3) -> Option<Vec3>;
+    fn fragment(&self, frag_coord: Vec3) -> Option<Vec4>;
 }
 
 // drawing context that is given to the user
 pub struct OwnedDrawingContext {
-    frame: image::RgbImage,
+    frame: image::RgbaImage,
     zbuf: Vec<f32>,
     viewport: Mat4,
 }
 
 // drawing context that this lib draws to, borrowing from the prev struct
 pub struct MutatingDrawingContext<'a> {
-    frame: &'a mut image::RgbImage,
+    frame: &'a mut image::RgbaImage,
     zbuf: &'a mut Vec<f32>,
     viewport: &'a Mat4,
 }
@@ -31,7 +31,7 @@ impl OwnedDrawingContext {
                 width as f32 / 16.,
                 height as f32 / 16.,
             ),
-            frame: image::RgbImage::new(width, height),
+            frame: image::RgbaImage::new(width, height),
             zbuf: vec![-f32::INFINITY; height as usize * width as usize],
         }
     }
@@ -50,7 +50,7 @@ impl OwnedDrawingContext {
     }
 
     pub fn copy_frame(&self) -> image::RgbImage {
-        self.frame.clone()
+        image::DynamicImage::from(self.frame.clone()).into_rgb8()
     }
 
     pub fn render_zbuf(&self) -> image::GrayImage {
@@ -175,10 +175,11 @@ pub fn rasterize(
             // if shader returns a color
             if let Some(rgb) = shader.fragment(bc) {
                 // convert to u8 rgb
-                let rgb = image::Rgb([
+                let rgb = image::Rgba([
                     rgb[R].clamp(0., 255.) as u8,
                     rgb[G].clamp(0., 255.) as u8,
                     rgb[B].clamp(0., 255.) as u8,
+                    rgb[A].clamp(0., 255.) as u8,
                 ]);
                 // then update depth and pixel
                 *depth_px = depth;

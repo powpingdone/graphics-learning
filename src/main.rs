@@ -18,8 +18,8 @@ struct SmoothFragShaderWithModel {
     tri: Mat3,
     sun: Vec3,
     tri_normal: Option<Mat3>,
-    nm_image: Option<image::RgbImage>,
-    diffuse_image: Option<image::RgbImage>,
+    nm_image: Option<image::RgbaImage>,
+    diffuse_image: Option<image::RgbaImage>,
     specular_image: Option<image::GrayImage>,
     tri_texture: Option<Mat3x2>,
 }
@@ -67,11 +67,11 @@ impl SmoothFragShaderWithModel {
         self.tri_texture = inp;
     }
 
-    fn set_nm_image(&mut self, inp: Option<image::RgbImage>) {
+    fn set_nm_image(&mut self, inp: Option<image::RgbaImage>) {
         self.nm_image = inp;
     }
 
-    fn set_diffuse_image(&mut self, inp: Option<image::RgbImage>) {
+    fn set_diffuse_image(&mut self, inp: Option<image::RgbaImage>) {
         self.diffuse_image = inp;
     }
 
@@ -110,7 +110,7 @@ fn get_uv_coord(frag_coord: Vec3, inp_coords: Mat3x2, dims: (u32, u32)) -> (u32,
 }
 
 impl FragShader for SmoothFragShaderWithModel {
-    fn fragment(&self, frag_coord: Vec3) -> Option<Vec3> {
+    fn fragment(&self, frag_coord: Vec3) -> Option<Vec4> {
         // base color to be manipulated
         let model_color = if let Some(mat) = self.tri_texture
             && let Some(ref img) = self.diffuse_image
@@ -123,13 +123,13 @@ impl FragShader for SmoothFragShaderWithModel {
                 .into_iter()
                 .map(|x| x as f32)
                 .collect::<Box<[_]>>();
-            Vec3::from([px[0], px[1], px[2]])
+            Vec4::from([px[0], px[1], px[2], px[3]])
         } else {
             // set as a "notexture", which is alternating purple and black
             if frag_coord.into_iter().sum::<f32>() % 1. > 0.5 {
-                Vec3::from([255., 0., 255.])
+                Vec4::from([255., 0., 255., 255.])
             } else {
-                Vec3::from([0., 0., 0.])
+                Vec4::from([0., 0., 0., 255.])
             }
         };
 
@@ -151,7 +151,7 @@ impl FragShader for SmoothFragShaderWithModel {
                     .into_iter()
                     .map(|x| 2. * (x as f32 / 255.) - 1.)
                     .collect::<Box<[_]>>();
-                // put into vec3
+                // put into vec4
                 Vec3::from([px[0], px[1], px[2]])
             } else if let Some(mat) = self.tri_normal {
                 // compute surface normal if we have it and the normal map doesn't exist
@@ -189,13 +189,15 @@ impl FragShader for SmoothFragShaderWithModel {
         });
 
         // finally, the actual combining part to realize the pixel
-        let final_model_color =
-            model_color.apply(|i| i * (ambient + 0.5 * diffuse + 0.8 * specular).min(1.));
+        let final_model_color = model_color
+            .swiz(R | G | B)
+            .apply(|i| i * (ambient + 0.5 * diffuse + 0.8 * specular).min(1.))
+            .extend(model_color[A]);
         Some(final_model_color)
     }
 }
 
-fn load_img(path: &OsStr, postfix: &str, text_ext: &OsStr) -> Option<image::RgbImage> {
+fn load_img(path: &OsStr, postfix: &str, text_ext: &OsStr) -> Option<image::RgbaImage> {
     // generate path
     let mut path = std::path::PathBuf::from(path);
     let fname = std::path::PathBuf::from(path.file_name().unwrap());
@@ -218,7 +220,7 @@ fn load_img(path: &OsStr, postfix: &str, text_ext: &OsStr) -> Option<image::RgbI
         .ok()?
         .flipv()
         .fliph()
-        .into_rgb8()
+        .into_rgba8()
         .into()
     }();
 
