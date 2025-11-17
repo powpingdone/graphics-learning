@@ -1,4 +1,6 @@
-*.tga
+render.tga
+zbuf.tga
 *~
 target/*
 .direnv/*
+*.png
