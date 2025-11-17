@@ -817,9 +817,9 @@ macro_rules! mat_mul {
                 const _ROWS_MATCH: () = assert!($rhs::COLS == $out::COLS);
 
                 let mut ret = $out::default();
-                for x in 0..$out::COLS {
-                    for y in 0..$out::ROWS {
-                        for i in 0..$lhs::COLS {
+                for x in 0..$lhs::COLS {
+                    for y in 0..$rhs::ROWS {
+                        for i in 0..$out::COLS {
                             ret[x][y] += self[x][i] * rhs[i][y];
                         }
                     }

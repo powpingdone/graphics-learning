@@ -21,6 +21,7 @@ struct SmoothFragShaderWithModel {
     nm_image: Option<image::RgbaImage>,
     diffuse_image: Option<image::RgbaImage>,
     specular_image: Option<image::GrayImage>,
+    nm_tan_image: Option<image::RgbaImage>,
     tri_texture: Option<Mat3x2>,
 }
 
@@ -32,6 +33,7 @@ impl SmoothFragShaderWithModel {
             tri: Mat3::default(),
             tri_normal: None,
             nm_image: None,
+            nm_tan_image: None,
             tri_texture: None,
             diffuse_image: None,
             specular_image: None,
@@ -71,6 +73,10 @@ impl SmoothFragShaderWithModel {
         self.nm_image = inp;
     }
 
+    fn set_nm_tangent_image(&mut self, inp: Option<image::RgbaImage>) {
+        self.nm_tan_image = inp;
+    }
+
     fn set_diffuse_image(&mut self, inp: Option<image::RgbaImage>) {
         self.diffuse_image = inp;
     }
@@ -99,7 +105,7 @@ where
 }
 
 // helper function to map dims to uv image coords
-fn get_uv_coord(frag_coord: Vec3, inp_coords: Mat3x2, dims: (u32, u32)) -> (u32, u32) {
+fn get_reflected_uv_coord(frag_coord: Vec3, inp_coords: Mat3x2, dims: (u32, u32)) -> (u32, u32) {
     // find coords in the triangle
     let coord: Vec2 = map_frag_coord_and_matrix(frag_coord, inp_coords.into_iter());
 
@@ -116,7 +122,7 @@ impl FragShader for SmoothFragShaderWithModel {
             && let Some(ref img) = self.diffuse_image
         {
             // pull from the diffuse image
-            let (x, y) = get_uv_coord(frag_coord, mat, img.dimensions());
+            let (x, y) = get_reflected_uv_coord(frag_coord, mat, img.dimensions());
             let px = img
                 .get_pixel(x, y)
                 .0
@@ -138,11 +144,52 @@ impl FragShader for SmoothFragShaderWithModel {
 
         // the texturing of the surface in relation to lighting
         let surface_norm = {
-            if let Some(mat) = self.tri_texture
+            if let Some(uv_mat) = self.tri_texture
+                && let Some(ref img) = self.nm_tan_image
+                && let Some(norm_mat) = self.tri_normal
+            {
+                // use precomputed tangent normal map
+                let (x, y) = get_reflected_uv_coord(frag_coord, uv_mat, img.dimensions());
+                // fetch pixel and convert to [-1, 1]
+                let px = img
+                    .get_pixel(x, y)
+                    .0
+                    .to_owned()
+                    .into_iter()
+                    .map(|x| 2. * (x as f32 / 255.) - 1.)
+                    .collect::<Box<[_]>>();
+                let px = Vec4::from([px[0], px[1], px[2], 1.]);
+                // compute tangent normal offsets
+                let edge0 = self.tri[1] - self.tri[0];
+                let edge1 = self.tri[2] - self.tri[0];
+                let edge = Mat2x4::from([edge0.extend(1.), edge1.extend(1.)]);
+                let uv_edge0 = uv_mat[1] - uv_mat[0];
+                let uv_edge1 = uv_mat[2] - uv_mat[0];
+                let uv_edge = Mat2::from([uv_edge0, uv_edge1]);
+
+                // compute tangent
+                let tangent_bitangent = edge * uv_edge.invert();
+                let basis_tangent = Mat4::from([
+                    tangent_bitangent[0].normalize(),
+                    tangent_bitangent[1].normalize(),
+                    norm_mat
+                        .iter()
+                        .copied()
+                        .zip(frag_coord.iter().copied())
+                        .map(|(e, i)| e.extend(1.) * i)
+                        .sum::<Vec4>()
+                        .normalize(),
+                    [0., 0., 0., 1.].into(),
+                ]);
+
+                // finally get norm coord
+                let fin = basis_tangent.t() * px;
+                (fin.shrink() / fin[W]).normalize()
+            } else if let Some(mat) = self.tri_texture
                 && let Some(ref img) = self.nm_image
             {
                 // use precomputed normal map
-                let (x, y) = get_uv_coord(frag_coord, mat, img.dimensions());
+                let (x, y) = get_reflected_uv_coord(frag_coord, mat, img.dimensions());
                 // fetch pixel and convert to [-1, 1]
                 let px = img
                     .get_pixel(x, y)
@@ -155,8 +202,7 @@ impl FragShader for SmoothFragShaderWithModel {
                 Vec3::from([px[0], px[1], px[2]])
             } else if let Some(mat) = self.tri_normal {
                 // compute surface normal if we have it and the normal map doesn't exist
-                // vary the normals based on how far away the normal
-                // is from the bary coord
+                // vary the normals based on how far away the normal is from the bary coord
                 map_frag_coord_and_matrix::<_, Vec3>(frag_coord, mat.into_iter()).normalize()
             } else {
                 // if we dont have any precomputed normals, compute the flat phong
@@ -179,7 +225,7 @@ impl FragShader for SmoothFragShaderWithModel {
                 && let Some(ref img) = self.specular_image
             {
                 // use the specular map
-                let (x, y) = get_uv_coord(frag_coord, mat, img.dimensions());
+                let (x, y) = get_reflected_uv_coord(frag_coord, mat, img.dimensions());
                 let px = img.get_pixel(x, y).0;
                 px[0] as f32
             } else {
@@ -239,7 +285,7 @@ fn main() -> Result<(), usize> {
     let center = Vec3::from([0., 0., 0.]);
     // this is inverted due to how coords are upside down in image
     let up = Vec3::from([0., -1., 0.]);
-    let sun = Vec3::from([1., 0., 1.]).normalize();
+    let sun = Vec3::from([-1., 0., 1.]);
     let mut fragshader = SmoothFragShaderWithModel::new(eye, center, up, sun);
 
     // extract out arglist
@@ -271,6 +317,7 @@ fn main() -> Result<(), usize> {
 
         // load textures
         fragshader.set_nm_image(load_img(path, "nm", text_ext));
+        fragshader.set_nm_tangent_image(load_img(path, "nm_tangent", text_ext));
         fragshader.set_diffuse_image(load_img(path, "diffuse", text_ext));
         fragshader.set_specular_image(
             load_img(path, "spec", text_ext).map(|x| image::DynamicImage::from(x).into_luma8()),
