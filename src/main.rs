@@ -1,5 +1,6 @@
 #![recursion_limit = "128"]
 use std::ffi::OsStr;
+use std::fmt::Pointer;
 use std::fs::File;
 use std::io::BufReader;
 
@@ -12,11 +13,51 @@ use crate::vec::*;
 mod gl_func;
 use crate::gl_func::*;
 
-struct SmoothFragShaderWithModel {
+// lighting prepass: compute zbuf on model to see where the light can reach
+struct LightingCompute {
+    perspective: Mat4,
+    modelview: Mat4,
+}
+
+impl LightingCompute {
+    fn new(sun: Vec3, center: Vec3, up: Vec3) -> Self {
+        Self {
+            perspective: perpsective_mat((sun - center).norm()),
+            modelview: modelview_mat(sun, center, up),
+        }
+    }
+
+    fn vertex_transform(&mut self, pt0: Vec3, pt1: Vec3, pt2: Vec3) -> Mat3x4 {
+        // warp each vertex through the model viewpoint and perspective
+        Mat3x4::from([
+            self.perspective * self.modelview * pt0.extend(1.),
+            self.perspective * self.modelview * pt1.extend(1.),
+            self.perspective * self.modelview * pt2.extend(1.),
+        ])
+    }
+
+    fn show_transform_mats(&self) -> (Mat4, Mat4) {
+        (self.perspective, self.modelview)
+    }
+}
+
+impl FragShader for LightingCompute {
+    // the reason that this is simple is that all we want is the zbuf for a triangle
+    fn fragment(&self, _: Vec3) -> Option<Vec4> {
+        Some(Vec4::default())
+    }
+}
+
+// texture drawing
+struct ModelDrawFragShader {
     perspective: Mat4,
     modelview: Mat4,
     tri: Mat3,
     sun: Vec3,
+    sun_zbuf: Vec<f32>,
+    sun_zbuf_wh: (usize, usize),
+    sun_transform: Mat4,
+    frag_transform: Mat4,
     tri_normal: Option<Mat3>,
     nm_image: Option<image::RgbaImage>,
     diffuse_image: Option<image::RgbaImage>,
@@ -25,11 +66,24 @@ struct SmoothFragShaderWithModel {
     tri_texture: Option<Mat3x2>,
 }
 
-impl SmoothFragShaderWithModel {
-    fn new(eye: Vec3, center: Vec3, up: Vec3, sun: Vec3) -> Self {
+impl ModelDrawFragShader {
+    fn new(
+        eye: Vec3,
+        center: Vec3,
+        up: Vec3,
+        viewport: Mat4,
+        sun: Vec3,
+        sun_zbuf: Vec<f32>,
+        sun_zbuf_wh: (usize, usize),
+        sun_perspective: Mat4,
+        sun_modelview: Mat4,
+        sun_viewport: Mat4,
+    ) -> Self {
+        let perspective = perpsective_mat((eye - center).norm());
+        let modelview = modelview_mat(eye, center, up);
         Self {
-            perspective: perpsective_mat((eye - center).norm()),
-            modelview: modelview_mat(eye, center, up),
+            perspective,
+            modelview,
             tri: Mat3::default(),
             tri_normal: None,
             nm_image: None,
@@ -38,6 +92,10 @@ impl SmoothFragShaderWithModel {
             diffuse_image: None,
             specular_image: None,
             sun,
+            sun_zbuf,
+            sun_zbuf_wh,
+            sun_transform: sun_perspective * sun_modelview * sun_viewport,
+            frag_transform: (perspective * modelview * viewport).invert(),
         }
     }
 
@@ -115,7 +173,7 @@ fn get_reflected_uv_coord(frag_coord: Vec3, inp_coords: Mat3x2, dims: (u32, u32)
     (x - 1, y - 1)
 }
 
-impl FragShader for SmoothFragShaderWithModel {
+impl FragShader for ModelDrawFragShader {
     fn fragment(&self, frag_coord: Vec3) -> Option<Vec4> {
         // base color to be manipulated
         let model_color = if let Some(mat) = self.tri_texture
@@ -219,6 +277,22 @@ impl FragShader for SmoothFragShaderWithModel {
         // then, make opposite of the sun vector for specular
         let reflect = (surface_norm * surface_norm.dot(self.sun) * 2. - self.sun).normalize();
 
+        // compute shadow coord
+        let shadow = self.frag_transform * frag_coord.extend(1.);
+        let shadow = self.sun_transform * shadow;
+        let shadow = shadow.shrink() / shadow[W];
+        // then check if we're in the sun's shadow
+        let x = (shadow[X].round() as usize).clamp(0, self.sun_zbuf_wh.0);
+        let y = (shadow[Y].round() as usize).clamp(0, self.sun_zbuf_wh.1);
+        let z = shadow[Z];
+        let shadow_factor = if (self.sun_zbuf[x + y * self.sun_zbuf_wh.1] - z).abs() > 1e-4 {
+            // we are in shadow
+            0.5
+        } else {
+            // we are in light
+            1.
+        };
+
         // then see, in the z direction, how reflective the surface should be
         let specular = reflect[Z].max(0.).powf({
             if let Some(mat) = self.tri_texture
@@ -237,7 +311,7 @@ impl FragShader for SmoothFragShaderWithModel {
         // finally, the actual combining part to realize the pixel
         let final_model_color = model_color
             .swiz(R | G | B)
-            .apply(|i| i * (ambient + 0.5 * diffuse + 0.8 * specular).min(1.))
+            .apply(|i| i * (ambient + 0.5 * diffuse + 0.8 * specular).min(1.) * shadow_factor)
             .extend(model_color[A]);
         Some(final_model_color)
     }
@@ -265,7 +339,6 @@ fn load_img(path: &OsStr, postfix: &str, text_ext: &OsStr) -> Option<image::Rgba
         .decode()
         .ok()?
         .flipv()
-        .fliph()
         .into_rgba8()
         .into()
     }();
@@ -280,13 +353,11 @@ fn load_img(path: &OsStr, postfix: &str, text_ext: &OsStr) -> Option<image::Rgba
 
 // https://haqr.eu/tinyrenderer
 fn main() -> Result<(), usize> {
-    let mut ctx = OwnedDrawingContext::new(1024, 1024);
-    let eye = Vec3::from([1., 0., 2.]);
+    let eye = Vec3::from([3., 0., 6.]);
     let center = Vec3::from([0., 0., 0.]);
     // this is inverted due to how coords are upside down in image
     let up = Vec3::from([0., -1., 0.]);
     let sun = Vec3::from([-1., 0., 1.]);
-    let mut fragshader = SmoothFragShaderWithModel::new(eye, center, up, sun);
 
     // extract out arglist
     let mut args = std::env::args_os();
@@ -303,23 +374,85 @@ fn main() -> Result<(), usize> {
         return Err(1);
     }
 
-    // per file path
-    for combo in args.chunks_exact(2) {
-        let path = &combo[0];
-        let text_ext = &combo[1];
+    // load objects
+    let objects = args
+        .chunks_exact(2)
+        .map(|i| {
+            let path = i[0].to_owned();
+            let ext = i[1].to_owned();
+            println!("loading object {}", path.display());
+            (Obj::load(&path).unwrap().data, path, ext)
+        })
+        .collect::<Box<[_]>>();
 
-        // load object
-        println!("loading object {}", path.display());
-        let obj = Obj::load(path).unwrap().data;
+    // render shadow zbuf
+    let mut shadow_ctx = OwnedDrawingContext::new(2048, 2048);
+    let mut shadow_zbuf = shadow_ctx.make_zbuf();
+    let mut blank_shader = LightingCompute::new(sun, center, up);
+    for (obj, _, _) in objects.iter() {
+        let verts = &obj.position;
+        // per object
+        for object in &obj.objects {
+            println!("shadowing object {}", object.name);
+            // per group of faces
+            for group in &object.groups {
+                let faces = &group.polys;
+                println!(
+                    "shadowing object group \"{}\" with face count {}",
+                    group.name,
+                    faces.len()
+                );
+
+                // per polygon
+                for face in faces.iter() {
+                    // decode and pack
+                    let pts = [face.0[0].0, face.0[1].0, face.0[2].0];
+                    let verts = pts
+                        .into_iter()
+                        .map(|x| Vec3::from(verts[x]))
+                        .collect::<Box<[_]>>();
+                    // transform
+                    let tri = blank_shader.vertex_transform(verts[0], verts[1], verts[2]);
+                    // render
+                    rasterize(shadow_ctx.mutate(), &blank_shader, tri, &mut shadow_zbuf);
+                }
+            }
+        }
+    }
+    let shadow_zbuf = shadow_zbuf;
+    let (shadow_persp, shadow_mv) = blank_shader.show_transform_mats();
+    let shadow_viewport = shadow_ctx.show_viewport();
+    shadow_ctx
+        .render_zbuf(&shadow_zbuf)
+        .save("light_zbuf.tga")
+        .unwrap();
+    drop((shadow_ctx, blank_shader));
+
+    // render image
+    let mut ctx = OwnedDrawingContext::new(2048, 2048);
+    let mut zbuf = ctx.make_zbuf();
+    let mut main_shader = ModelDrawFragShader::new(
+        eye,
+        center,
+        up,
+        ctx.show_viewport(),
+        sun,
+        shadow_zbuf,
+        (2048, 2048),
+        shadow_persp,
+        shadow_mv,
+        shadow_viewport,
+    );
+    for (obj, path, text_ext) in objects.iter() {
         let verts = &obj.position;
         let norms = &obj.normal;
         let uv = &obj.texture;
 
         // load textures
-        fragshader.set_nm_image(load_img(path, "nm", text_ext));
-        fragshader.set_nm_tangent_image(load_img(path, "nm_tangent", text_ext));
-        fragshader.set_diffuse_image(load_img(path, "diffuse", text_ext));
-        fragshader.set_specular_image(
+        main_shader.set_nm_image(load_img(path, "nm", text_ext));
+        main_shader.set_nm_tangent_image(load_img(path, "nm_tangent", text_ext));
+        main_shader.set_diffuse_image(load_img(path, "diffuse", text_ext));
+        main_shader.set_specular_image(
             load_img(path, "spec", text_ext).map(|x| image::DynamicImage::from(x).into_luma8()),
         );
 
@@ -345,8 +478,8 @@ fn main() -> Result<(), usize> {
                     let pt1 = Vec3::from(vert1);
                     let pt2 = Vec3::from(vert2);
                     // make clip(triangle) coords
-                    fragshader.set_tri_from_coords(pt0, pt1, pt2);
-                    let tri = fragshader.copy_tri_arr();
+                    main_shader.set_tri_from_coords(pt0, pt1, pt2);
+                    let tri = main_shader.copy_tri_arr();
 
                     // decode texture coords
                     let uv_pts = [face.0[0].1, face.0[1].1, face.0[2].1];
@@ -359,10 +492,10 @@ fn main() -> Result<(), usize> {
                             .collect::<Box<[_]>>();
                         // collect and set
                         let uv_verts = Mat3x2::from([uv_pts[0], uv_pts[1], uv_pts[2]]);
-                        fragshader.set_tri_uv(Some(uv_verts));
+                        main_shader.set_tri_uv(Some(uv_verts));
                     } else {
                         // unset otherwise
-                        fragshader.set_tri_uv(None);
+                        main_shader.set_tri_uv(None);
                     }
 
                     // decode normals
@@ -376,14 +509,14 @@ fn main() -> Result<(), usize> {
                             .collect::<Box<[_]>>();
                         // collect and set
                         let nverts = Mat3::from([npts[0], npts[1], npts[2]]);
-                        fragshader.set_tri_normal(Some(nverts));
+                        main_shader.set_tri_normal(Some(nverts));
                     } else {
                         // if not, unset
-                        fragshader.set_tri_normal(None);
+                        main_shader.set_tri_normal(None);
                     }
 
                     // raster the tri
-                    rasterize(ctx.mutate(), &fragshader, tri);
+                    rasterize(ctx.mutate(), &main_shader, tri, &mut zbuf);
                 }
             }
         }
@@ -393,7 +526,7 @@ fn main() -> Result<(), usize> {
     ctx.copy_frame().save("render.tga").unwrap();
 
     // show zbuf
-    ctx.render_zbuf().save("zbuf.tga").unwrap();
+    ctx.render_zbuf(&zbuf).save("zbuf.tga").unwrap();
     ctx.clear_bufs();
 
     Ok(())

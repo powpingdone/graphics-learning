@@ -11,14 +11,12 @@ pub trait FragShader {
 // drawing context that is given to the user
 pub struct OwnedDrawingContext {
     frame: image::RgbaImage,
-    zbuf: Vec<f32>,
     viewport: Mat4,
 }
 
 // drawing context that this lib draws to, borrowing from the prev struct
 pub struct MutatingDrawingContext<'a> {
     frame: &'a mut image::RgbaImage,
-    zbuf: &'a mut Vec<f32>,
     viewport: &'a Mat4,
 }
 
@@ -32,40 +30,35 @@ impl OwnedDrawingContext {
                 height as f32 / 16.,
             ),
             frame: image::RgbaImage::new(width, height),
-            zbuf: vec![-f32::INFINITY; height as usize * width as usize],
         }
     }
 
     pub fn mutate(&'_ mut self) -> MutatingDrawingContext<'_> {
         MutatingDrawingContext {
             frame: &mut self.frame,
-            zbuf: &mut self.zbuf,
             viewport: &self.viewport,
         }
     }
 
     pub fn clear_bufs(&mut self) {
         self.frame.fill(0);
-        self.zbuf.fill(0.);
     }
 
     pub fn copy_frame(&self) -> image::RgbImage {
         image::DynamicImage::from(self.frame.clone()).into_rgb8()
     }
 
-    pub fn render_zbuf(&self) -> image::GrayImage {
-        let zmin = self.zbuf.iter().fold(f32::INFINITY, |acc, x| {
+    pub fn render_zbuf(&self, zbuf: &Vec<f32>) -> image::GrayImage {
+        let zmin = zbuf.iter().fold(f32::INFINITY, |acc, x| {
             if x.is_finite() && *x < acc { *x } else { acc }
         });
-        let zmax = self
-            .zbuf
+        let zmax = zbuf
             .iter()
             .fold(-f32::INFINITY, |acc, x| if *x > acc { *x } else { acc });
         image::GrayImage::from_vec(
             self.frame.width(),
             self.frame.height(),
-            self.zbuf
-                .iter()
+            zbuf.iter()
                 .map(|x| {
                     if x.is_infinite() {
                         0
@@ -76,6 +69,14 @@ impl OwnedDrawingContext {
                 .collect(),
         )
         .unwrap()
+    }
+
+    pub fn make_zbuf(&self) -> Vec<f32> {
+        vec![-f32::INFINITY; self.frame.height() as usize * self.frame.width() as usize]
+    }
+
+    pub fn show_viewport(&self) -> Mat4 {
+        self.viewport
     }
 }
 
@@ -118,6 +119,7 @@ pub fn rasterize(
     ctx: MutatingDrawingContext<'_>,
     shader: &(dyn FragShader + Send + Sync),
     tri: Mat3x4,
+    zbuf: &mut Vec<f32>,
 ) {
     // normalized device coords
     let ndc: Mat3x4 = tri.apply(|i| i / i[W]).into();
@@ -156,7 +158,7 @@ pub fn rasterize(
     ctx.frame
         .par_enumerate_pixels_mut()
         // with zbuffer
-        .zip(ctx.zbuf.par_iter_mut())
+        .zip(zbuf.par_iter_mut())
         // within bounding box
         .filter(|((x, y, _), _)| *x >= min_x && *x < max_x && *y >= min_y && *y < max_y)
         .for_each(|((x, y, px), depth_px)| {
