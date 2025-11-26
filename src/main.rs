@@ -278,12 +278,11 @@ impl FragShader for ModelDrawFragShader {
         let reflect = (surface_norm * surface_norm.dot(self.sun) * 2. - self.sun).normalize();
 
         // compute shadow coord
-        let shadow = self.frag_transform * frag_coord.extend(1.);
-        let shadow = self.sun_transform * shadow;
+        let shadow = self.sun_transform * self.frag_transform * frag_coord.extend(1.);
         let shadow = shadow.shrink() / shadow[W];
         // then check if we're in the sun's shadow
-        let x = (shadow[X].round() as usize).clamp(0, self.sun_zbuf_wh.0);
-        let y = (shadow[Y].round() as usize).clamp(0, self.sun_zbuf_wh.1);
+        let x = ((self.sun_zbuf_wh.0 as f32 * shadow[X]).round()).max(0.) as usize;
+        let y = ((self.sun_zbuf_wh.1 as f32 * shadow[Y]).round()).max(0.) as usize;
         let z = shadow[Z];
         let shadow_factor = if (self.sun_zbuf[x + y * self.sun_zbuf_wh.1] - z).abs() > 1e-4 {
             // we are in shadow
@@ -386,7 +385,7 @@ fn main() -> Result<(), usize> {
         .collect::<Box<[_]>>();
 
     // render shadow zbuf
-    let mut shadow_ctx = OwnedDrawingContext::new(2048, 2048);
+    let mut shadow_ctx = OwnedDrawingContext::new(1024, 1024);
     let mut shadow_zbuf = shadow_ctx.make_zbuf();
     let mut blank_shader = LightingCompute::new(sun, center, up);
     for (obj, _, _) in objects.iter() {
@@ -438,7 +437,7 @@ fn main() -> Result<(), usize> {
         ctx.show_viewport(),
         sun,
         shadow_zbuf,
-        (2048, 2048),
+        (1024, 1024),
         shadow_persp,
         shadow_mv,
         shadow_viewport,
